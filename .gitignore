@@ -39,6 +39,10 @@ data/*.gml
 data/*.csv
 !data/.gitkeep
 
+# govt data archives — block at any path
+*.zip
+*.gml.gz
+
 # generated
 packages/web/dist/
 packages/api/htmlcov/

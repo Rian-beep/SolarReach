@@ -96,10 +96,10 @@ All my-scope tests green. Two pre-existing failures in `tests/test_flux_panels.p
 
 ## Live API smoke test — KEY ISSUE
 
-The `COMPANIES_HOUSE_API_KEY` value in `.env.local` (`81f025d7-b5eb-41a0-89cd-3d11c8e45700`) returns **401 Unauthorised** when tested via both my client and a direct curl:
+The `COMPANIES_HOUSE_API_KEY` value in `.env.local` (REDACTED — see `docs/SECURITY-INCIDENT.md`) returns **401 Unauthorised** when tested via both my client and a direct curl:
 
 ```
-curl -u "81f025d7-...:" 'https://api.company-information.service.gov.uk/search/companies?q=BARCLAYS' -> 401
+curl -u "<REDACTED-KEY>:" 'https://api.company-information.service.gov.uk/search/companies?q=BARCLAYS' -> 401
 ```
 
 **Action required by Luke**: rotate the key at https://developer.company-information.service.gov.uk/manage-applications. Once `.env.local` has a working key:

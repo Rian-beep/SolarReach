@@ -45,7 +45,15 @@ open http://localhost:5173
 - [`docs/CONTRACTS.md`](docs/CONTRACTS.md) — API + component contracts (every team member reads this first)
 - [`docs/TEAMMATE-ONBOARDING.md`](docs/TEAMMATE-ONBOARDING.md) — start-here guide for non-agentic teammates
 - [`docs/RUNBOOK-DEMO.md`](docs/RUNBOOK-DEMO.md) — verbatim 7-min demo path
+- [`docs/SECURITY.md`](docs/SECURITY.md) — secret-handling policy + rotation procedure
 - [`docs/agent-log/`](docs/agent-log/) — live status from each parallel build agent
+
+## First-time contributor setup
+After cloning, enable the secret-scanning pre-commit hook:
+```bash
+git config core.hooksPath .githooks
+```
+This rejects commits that would push API keys to GitHub. See [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Hackathon rules adherence
 - **New work only** — every commit on this repo dated 2026-05-02 onward

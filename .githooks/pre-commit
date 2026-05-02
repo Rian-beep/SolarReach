@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# SolarReach pre-commit secret scanner.
+# Enable per clone:   git config core.hooksPath .githooks
+# See docs/SECURITY.md for policy.
+
+set -euo pipefail
+
+# --- regex patterns ---------------------------------------------------------
+# Each pattern is (label|regex). Tabs separate fields.
+PATTERNS=(
+  $'anthropic_key\tsk-ant-api[0-9]{2}-[A-Za-z0-9_-]{50,}'
+  $'anthropic_legacy\tsk-ant-[A-Za-z0-9_-]{60,}'
+  $'google_api_key\tAIza[0-9A-Za-z_-]{35}'
+  $'elevenlabs_key\tsk_[a-f0-9]{40,}'
+  $'voyage_key\tpa-[A-Za-z0-9_-]{30,}'
+  $'mongodb_srv_with_creds\tmongodb\\+srv://[^:/[:space:]]+:[^@[:space:]]+@'
+  $'mongodb_with_creds\tmongodb://[^:/[:space:]]+:[^@[:space:]/]+@[A-Za-z0-9.-]*\\.(mongodb|amazonaws|azure|gcp)'
+  $'companies_house_uuid\tCOMPANIES_HOUSE[A-Z_]*[[:space:]=:\"\x27]+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+  $'aws_access_key\t(AKIA|ASIA)[0-9A-Z]{16}'
+  $'github_token\tghp_[A-Za-z0-9]{36}'
+  $'openai_key\tsk-proj-[A-Za-z0-9_-]{40,}'
+)
+
+# --- collect staged additions ----------------------------------------------
+# We only scan added/modified lines, not whole files, to avoid noise.
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+# Skip obvious safe paths (the example/template files, lockfiles, this hook).
+SKIP_REGEX='^(\.env\.example|\.env\.local\.template|\.githooks/pre-commit|pnpm-lock\.yaml|package-lock\.json|.*\.lock|docs/SECURITY-INCIDENT\.md|docs/SECURITY\.md)$'
+
+VIOLATIONS=()
+
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  if echo "$file" | grep -qE "$SKIP_REGEX"; then
+    continue
+  fi
+  # Skip binary files.
+  if git diff --cached --numstat -- "$file" | awk '{print $1}' | grep -q '^-$'; then
+    continue
+  fi
+  # Diff added lines only (lines starting with + but not the +++ header).
+  added=$(git diff --cached -U0 -- "$file" | grep -E '^\+' | grep -vE '^\+\+\+')
+
+  for entry in "${PATTERNS[@]}"; do
+    label="${entry%%	*}"
+    regex="${entry#*	}"
+    if echo "$added" | grep -qE "$regex"; then
+      # Don't echo the matched secret — only file + label.
+      VIOLATIONS+=("$file: $label")
+    fi
+  done
+done <<< "$STAGED_FILES"
+
+# --- optional gitleaks / trufflehog pass -----------------------------------
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact --no-banner >/dev/null 2>&1; then
+    VIOLATIONS+=("gitleaks: staged content flagged (run \`gitleaks protect --staged --redact\` to see)")
+  fi
+fi
+
+if command -v trufflehog >/dev/null 2>&1; then
+  # trufflehog filesystem on staged files; --no-update keeps it offline.
+  staged_paths=$(git diff --cached --name-only --diff-filter=ACMR | tr '\n' ' ')
+  if [ -n "$staged_paths" ]; then
+    if trufflehog filesystem $staged_paths --no-update --fail --no-verification >/dev/null 2>&1; then
+      :
+    else
+      # trufflehog returns non-zero on finding; we treat that as a violation.
+      VIOLATIONS+=("trufflehog: staged content flagged")
+    fi
+  fi
+fi
+
+# --- report ----------------------------------------------------------------
+if [ ${#VIOLATIONS[@]} -gt 0 ]; then
+  echo ""
+  echo "===================================================================="
+  echo " pre-commit: SECRET SCANNER FAILED"
+  echo "===================================================================="
+  for v in "${VIOLATIONS[@]}"; do
+    echo "  - $v"
+  done
+  echo ""
+  echo " The matched values were NOT printed (so this output is itself"
+  echo " safe to paste in Slack)."
+  echo ""
+  echo " To fix:"
+  echo "  1. Remove the secret from the staged file."
+  echo "  2. Move it to .env.local (gitignored)."
+  echo "  3. If the secret was already valid in production, ROTATE IT."
+  echo "     See docs/SECURITY.md section 3 for the procedure."
+  echo ""
+  echo " To bypass (use sparingly, leaves a trail):"
+  echo "  git commit --no-verify"
+  echo "===================================================================="
+  exit 1
+fi
+
+exit 0
