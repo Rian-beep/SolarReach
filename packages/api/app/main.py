@@ -38,17 +38,44 @@ async def lifespan(app: FastAPI):
 
     # Sync settings → os.environ so subsystems that read os.getenv() directly
     # (e.g. the swarm package, langchain, voyageai) pick up .env values.
-    # We only fill keys that aren't already exported in the parent shell.
+    # Some parent shells (e.g. Claude Desktop) export ANTHROPIC_API_KEY="" —
+    # which both `os.environ.get(k)` truthy-checks and pydantic-settings treat
+    # as "set". We override those empties from .env files explicitly.
     import os
+
+    file_vals: dict[str, str] = {}
+    try:
+        from dotenv import dotenv_values
+
+        from pathlib import Path as _P
+        # Project root is two levels up from this file (packages/api/app/main.py).
+        repo_root = _P(__file__).resolve().parents[3]
+        for candidate in (".env", ".env.local"):
+            for base in (_P("."), _P("packages/api"), repo_root):
+                p = base / candidate
+                if p.exists():
+                    file_vals.update(
+                        {k: v for k, v in dotenv_values(p).items() if v}
+                    )
+    except Exception as e:  # noqa: BLE001
+        log.info("dotenv preload skipped: %s", type(e).__name__)
+
     _env_pairs = {
-        "ANTHROPIC_API_KEY": settings.anthropic_api_key,
+        "ANTHROPIC_API_KEY": settings.anthropic_api_key
+        or file_vals.get("ANTHROPIC_API_KEY", ""),
         "MONGO_URI": settings.mongo_uri,
         "MONGO_DB": settings.mongo_db,
-        "ELEVENLABS_API_KEY": settings.elevenlabs_api_key,
-        "ELEVENLABS_AGENT_ID": settings.elevenlabs_agent_id,
-        "COMPANIES_HOUSE_API_KEY": settings.companies_house_api_key,
+        "ELEVENLABS_API_KEY": settings.elevenlabs_api_key
+        or file_vals.get("ELEVENLABS_API_KEY", ""),
+        "ELEVENLABS_AGENT_ID": settings.elevenlabs_agent_id
+        or file_vals.get("ELEVENLABS_AGENT_ID", ""),
+        "COMPANIES_HOUSE_API_KEY": settings.companies_house_api_key
+        or file_vals.get("COMPANIES_HOUSE_API_KEY", ""),
+        "VOYAGE_API_KEY": file_vals.get("VOYAGE_API_KEY", ""),
+        "SERPAPI_API_KEY": file_vals.get("SERPAPI_API_KEY", ""),
     }
     for k, v in _env_pairs.items():
+        # Override even if currently set, when current is empty-string.
         if v and not os.environ.get(k):
             os.environ[k] = v
 

@@ -6,6 +6,7 @@ import { RadianceCanvas } from "@/components/map3d/RadianceCanvas";
 import { HUDCoords } from "@/components/map3d/HUD-Coords";
 import { HUDScale } from "@/components/map3d/HUD-Scale";
 import { HUDLegend } from "@/components/map3d/HUD-Legend";
+import { HUDBenchmarks } from "@/components/map3d/HUD-Benchmarks";
 import {
   HUDLayerToggle,
   type LayerDataCounts,
@@ -208,6 +209,7 @@ export function App() {
               <ErrorBoundary scope="hud">
                 <HUDCoords />
                 <HUDScale />
+                <HUDBenchmarks />
                 <HUDLegend />
                 <HUDLayerToggle
                   state={layers}

@@ -76,10 +76,54 @@ Per-section schemas (fields are STRICT — extra keys ignored, missing keys defa
 
 If a field is unknown, use a sensible default — never block the deck.
 
+## Industry Benchmarks (UK 2025-26 — single source of truth)
+
+These are the canonical UK reference numbers. The map HUD chip
+(`HUD-Benchmarks`) shows the same figures, and the calculator's "industry
+typical" annotations cite the same values. Use them when the deck's
+`problem` / `solution` / `social_impact` / `tech_specs` slides need a
+contextual figure that is NOT in the lead's `financial` block.
+
+Mirror of `packages/shared/py/solarreach_shared/industry_benchmarks.py` —
+do not invent or re-estimate.
+
+- **Install cost**: median **£950/kW** for UK commercial roof-mount PV
+  (range £800–£1,100/kW, 2025-26 STA mid-market).
+- **Generation**: typical UK yield **950 kWh/kWp·yr** (south-facing, 30–40°
+  tilt, 85% performance ratio); annual horizontal irradiance **~1,050
+  kWh/m²·yr** average (Cornwall ~1,200, Highlands ~900).
+- **Panel**: 420W tier-1 monocrystalline (PERC/TOPCon) is the modern norm;
+  0.5%/yr linear degradation under tier-1 warranty.
+- **SEG export**: best-available **15p/kWh** (Octopus Outgoing Fixed,
+  2025-26). Suppliers must offer a non-zero SEG; competitive band 5–15p.
+- **Grid import**: reference UK commercial unit rate **27p/kWh** (excl.
+  standing charge); up ~78% from the 2019 baseline.
+- **Payback**: UK commercial median **7.5 years** for capex-model PV with
+  ~50% self-consumption + SEG export (range 6–10 years).
+- **IRR (25yr)**: typical **10%** for UK commercial capex model
+  (range 8–12%).
+- **Capital allowances**: AIA cap **£1m/yr** (100% first-year deduction);
+  full expensing also available for new main-rate plant. Solar PV qualifies
+  when client-owned (not under operating lease).
+- **Grid carbon intensity**: **0.193 kg CO₂e/kWh** (BEIS / DESNZ 2025).
+  *Note: this 2025 figure supersedes the older 0.207 figure cited in the
+  schema notes — for new decks generated 2025-26, use 0.193.*
+- **Tree equivalence**: ~22 kg CO₂/yr per mature broadleaf tree.
+- **VAT**: 0% on residential PV (UK 2022-04 → 2027-03); 20% on commercial
+  installs (recoverable as input VAT).
+- **Market growth**: UK non-domestic PV capacity **+21% YoY** 2024 → 2025
+  (Solar Energy UK industry report 2025).
+
+When the deck's `problem` slide says "commercial electricity up 78% since
+2019", that is **this exact figure** — do not paraphrase or round.
+
 ## Hard rules
 
 - Output JSON only — no markdown fences, no prose.
 - All GBP figures from the lead's `financial` block exactly. Do not round or
   re-estimate.
+- All UK industry context numbers (install £/kW, payback, SEG rate, grid
+  CO₂, capital allowances) come from the **Industry Benchmarks** section
+  above. Do not invent alternatives.
 - The `funding` array contains all 5 models in the canonical order, even if one
   is a poor fit (mark its `fit` accordingly).

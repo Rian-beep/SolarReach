@@ -47,8 +47,13 @@ async def _fallback_log_audit(
         "recipient_sha256": _hash_email(recipient_email) if recipient_email else None,
         "metadata": metadata or {},
     }
+    # Tools call this with either a sync pymongo db (CrewAI tool callbacks) or
+    # an async motor db (API process). Sniff the return type and only await
+    # when it's awaitable so we don't TypeError on sync inserts.
     try:
-        await db.audit_log.insert_one(doc)
+        ret = db.audit_log.insert_one(doc)
+        if asyncio.iscoroutine(ret):
+            await ret
     except Exception as e:  # noqa: BLE001 — audit must never break the call
         log.warning("audit_log fallback insert failed: %s", type(e).__name__)
     return doc["_id"]
