@@ -28,6 +28,7 @@ from app.routers import realapi as realapi_router
 from app.routers import rian as rian_router
 from app.routers import scan as scan_router
 from app.routers import swarm as swarm_router
+from app.routers import langchain_router as langchain_router_module
 from app.routers import voice as voice_router
 
 log = logging.getLogger("solarreach.api")
@@ -135,6 +136,7 @@ def create_app() -> FastAPI:
     app.include_router(realapi_router.router, tags=["realapi"])
     app.include_router(rian_router.router, tags=["rian"])
     app.include_router(swarm_router.router, tags=["swarm"])
+    app.include_router(langchain_router_module.router, tags=["langchain"])
     # Static (generated decks/pdfs)
     static_dir = Path("/tmp/decks")
     static_dir.mkdir(parents=True, exist_ok=True)

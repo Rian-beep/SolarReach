@@ -153,6 +153,15 @@ export interface PitchResponse {
   deck_json: Record<string, unknown>;
 }
 
+export type OutreachChannel = "email" | "linkedin" | "intro_call";
+
+export interface OutreachResponse {
+  subject: string;
+  body: string;
+  channel: OutreachChannel;
+  cost_cents: number;
+}
+
 export type VoiceProviderStatus =
   | "ok"
   | "demo_mode"

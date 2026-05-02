@@ -12,6 +12,8 @@ import type {
   FluxOverlay,
   InboundLeadPayload,
   Lead,
+  OutreachChannel,
+  OutreachResponse,
   PanelLayout,
   PitchResponse,
   PricingTier,
@@ -189,6 +191,30 @@ export function useGeneratePitch(): UseMutationResult<
         }),
       }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["spend"] });
+    },
+  });
+}
+
+// ─── Outreach (channel-tailored, Sonnet 4.6) ──────────────────────────────
+
+export function useGenerateOutreach(): UseMutationResult<
+  OutreachResponse,
+  Error,
+  { leadId: string; channel: OutreachChannel; clientId?: string }
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, channel, clientId }) =>
+      http<OutreachResponse>(`/lead/${leadId}/outreach`, {
+        method: "POST",
+        body: JSON.stringify({
+          client_id: clientId ?? "client-greensolar-uk",
+          channel,
+        }),
+      }),
+    onSuccess: (_, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
       qc.invalidateQueries({ queryKey: ["spend"] });
     },
   });

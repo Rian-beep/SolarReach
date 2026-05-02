@@ -662,6 +662,116 @@ async def pitch(
     return JSONResponse(payload)
 
 
+# --- POST /lead/<id>/outreach ---
+
+
+class OutreachRequest(BaseModel):
+    client_id: str
+    channel: str  # "email" | "linkedin" | "intro_call"
+
+
+_VALID_OUTREACH_CHANNELS = {"email", "linkedin", "intro_call"}
+
+
+@router.post("/lead/{lead_id}/outreach")
+async def outreach(
+    lead_id: str,
+    body: OutreachRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+):
+    """Generate a tailored outreach message in the requested channel.
+
+    Pulls the lead joined with company + decision_maker, calls Sonnet 4.6
+    via the codex `outreach` generator, persists the result to
+    `lead.outreach.<channel>` and audits the call. Soft-fails to a
+    deterministic fallback on any LLM error so the demo flow never blocks.
+    """
+    if body.channel not in _VALID_OUTREACH_CHANNELS:
+        raise HTTPException(
+            400,
+            f"channel must be one of {sorted(_VALID_OUTREACH_CHANNELS)}",
+        )
+
+    lead = await db.leads.find_one({"_id": lead_id})
+    if not lead:
+        raise HTTPException(404, "lead not found")
+
+    # Join company + directors so the generator has full context.
+    lead = await _join_lead(db, lead)
+
+    client_doc = await db.clients.find_one({"_id": body.client_id}) or {}
+    decision_maker = lead.get("decision_maker") or {
+        "name": "Decision Maker",
+        "role": "Director",
+        "confidence": 0.5,
+        "rationale": "default — call /build_org to refine",
+    }
+
+    used_real = False
+    err_msg: str | None = None
+    cost_cents: float = 0.0
+    subject: str = ""
+    out_body: str = ""
+
+    try:
+        from codex_brain.anthropic_client import AnthropicClient
+        from codex_brain.generators.outreach import generate_tailored_outreach
+
+        if not settings.anthropic_api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY missing")
+
+        anthropic_client = AnthropicClient(api_key=settings.anthropic_api_key)
+        result = await generate_tailored_outreach(
+            lead,
+            decision_maker,
+            client_doc,
+            body.channel,  # type: ignore[arg-type]
+            anthropic_client=anthropic_client,
+        )
+        subject = str(result.get("subject") or "")
+        out_body = str(result.get("body") or "")
+        cost_cents = float(result.get("cost_cents") or 0.0)
+        used_real = True
+    except Exception as e:  # noqa: BLE001 — never crash the demo flow
+        err_msg = str(e)
+        log.warning("real outreach failed, using fallback: %s", e)
+        # Inline fallback that doesn't need a working Anthropic call
+        from codex_brain.generators.outreach import _fallback_message  # type: ignore
+
+        fb = _fallback_message(lead, decision_maker, body.channel)  # type: ignore[arg-type]
+        subject = fb["subject"]
+        out_body = fb["body"]
+
+    payload = {
+        "subject": subject,
+        "body": out_body,
+        "channel": body.channel,
+        "cost_cents": cost_cents,
+    }
+
+    await log_audit(
+        db,
+        action="lead.outreach",
+        lead_id=lead_id,
+        cost_cents=int(round(cost_cents)),
+        metadata={
+            "client_id": body.client_id,
+            "channel": body.channel,
+            "stub": not used_real,
+            "error": err_msg,
+            "model": "claude-sonnet-4-6" if used_real else None,
+        },
+    )
+
+    # Persist per-channel so generating another channel doesn't clobber prior.
+    await db.leads.update_one(
+        {"_id": lead_id},
+        {"$set": {f"outreach.{body.channel}": payload}},
+    )
+    return JSONResponse(payload)
+
+
 @router.get("/lead/{lead_id}/pitch/download")
 async def pitch_download(
     lead_id: str,

@@ -469,6 +469,53 @@ def panels_from_solar_api(
     return out
 
 
+async def geotiff_to_inferno_png_with_s3(
+    geotiff_bytes: bytes,
+    out_path: str,
+    *,
+    s3_key: str | None = None,
+) -> dict:
+    """Sync render via :func:`geotiff_to_inferno_png`, then optionally
+    upload the result to S3 and surface the presigned URL on the meta dict.
+
+    Returns the same ``{bbox, vmin, vmax}`` shape as the sync function plus:
+      - ``s3_url``: presigned URL (1h TTL) if upload succeeded, else None.
+      - ``s3_uploaded``: bool, whether the upload actually went through.
+
+    S3 is best-effort: any failure (no creds, network, permission) is logged
+    and degrades to ``s3_url=None``. The caller already has ``out_path`` on
+    disk and can fall back to its ``/static/flux/*.png`` URL.
+
+    Kept as a separate function from the sync renderer so existing
+    deterministic tests don't have to deal with an async/await boundary
+    they don't need.
+    """
+    meta = geotiff_to_inferno_png(geotiff_bytes, out_path)
+    s3_url: str | None = None
+    s3_uploaded = False
+    if s3_key:
+        try:
+            # Lazy import to avoid touching aioboto3 unless this path is hit.
+            from app.services.s3_storage import get_s3_storage
+
+            with open(out_path, "rb") as f:
+                png_bytes = f.read()
+            res = await get_s3_storage().put_object(
+                s3_key,
+                png_bytes,
+                content_type="image/png",
+                local_path=out_path,
+            )
+            if res.uploaded:
+                s3_url = res.url
+                s3_uploaded = True
+        except Exception as e:  # noqa: BLE001 — never block the demo
+            log.warning("flux s3 upload failed key=%s err=%s", s3_key, e)
+    meta["s3_url"] = s3_url
+    meta["s3_uploaded"] = s3_uploaded
+    return meta
+
+
 __all__ = [
     "SolarAPIError",
     "MAX_DRIFT_M",
@@ -476,5 +523,6 @@ __all__ = [
     "get_data_layers",
     "download_geotiff",
     "geotiff_to_inferno_png",
+    "geotiff_to_inferno_png_with_s3",
     "panels_from_solar_api",
 ]

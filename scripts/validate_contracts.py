@@ -99,12 +99,31 @@ def main() -> int:
     if extra:
         # Extras are warnings, not errors — internal routes (admin, openapi) are fine.
         # Filter known internals.
+        # Whitelisted experiments + agent-fabric endpoints — owned by individual
+        # agents (A2 swarm, A3 LangChain, A4 voice, A5 integration). They are
+        # intentionally kept out of CONTRACTS.md §2 until they stabilise into
+        # cross-agent contracts. Add to §2 instead of this list when promoting.
+        WHITELIST_PREFIXES = (
+            "/openapi",
+            "/docs",
+            "/redoc",
+            "/admin/demo-reset",
+            "/static",
+            "/swarm/",
+            "/rian/",
+            "/langchain/",
+            "/integration/",
+            "/voice/pitch_audio",
+        )
+        WHITELIST_SUFFIXES = (
+            "/outreach",
+            "/outreach_event",
+        )
         meaningful = {
             (m, p)
             for (m, p) in extra
-            if not p.startswith(
-                ("/openapi", "/docs", "/redoc", "/admin/demo-reset", "/static")
-            )
+            if not p.startswith(WHITELIST_PREFIXES)
+            and not any(p.endswith(s) for s in WHITELIST_SUFFIXES)
         }
         if meaningful:
             print("\n::warning::FastAPI routes not declared in CONTRACTS.md:")

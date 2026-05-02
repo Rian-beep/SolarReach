@@ -62,6 +62,7 @@ PANEL_TILT_DEG = 60.0
 PANEL_AZIMUTH_DEG = 180.0  # south-facing
 PANEL_KWH_YR = 340.0       # mid-band ~340 W panel × ~1000 hr equivalent
 SYNTH_MIN_PANELS = 6       # below this we treat the layout as "missing"
+SYNTH_TARGET_PANELS = 180  # demo target — caps oversized synth bboxes
 
 # ElevenLabs default "George" voice — same one the demo TTS smoke uses.
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
@@ -182,6 +183,224 @@ async def _ensure_flux_panels(http: httpx.AsyncClient, lead_id: str) -> dict[str
     except Exception as e:  # noqa: BLE001
         out["panels_error"] = f"{type(e).__name__}: {e}"
     return out
+
+
+def _polygon_centroid(ring: list[list[float]]) -> tuple[float, float]:
+    """Centroid of a closed lng/lat ring (last point == first)."""
+    pts = ring[:-1] if ring and ring[0] == ring[-1] else ring
+    if not pts:
+        return 0.0, 0.0
+    lng = sum(p[0] for p in pts) / len(pts)
+    lat = sum(p[1] for p in pts) / len(pts)
+    return lng, lat
+
+
+def _point_in_ring(lng: float, lat: float, ring: list[list[float]]) -> bool:
+    """Standard ray-cast point-in-polygon. Ring is closed lng/lat."""
+    inside = False
+    n = len(ring)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        if ((yi > lat) != (yj > lat)) and (
+            lng < (xj - xi) * (lat - yi) / ((yj - yi) or 1e-12) + xi
+        ):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _meters_per_degree(lat_deg: float) -> tuple[float, float]:
+    """Approx metres-per-degree of (lng, lat) at a given latitude.
+
+    Local tangent-plane approximation — accurate to ~0.3% for sub-km panels.
+    """
+    rad = math.radians(lat_deg)
+    m_per_deg_lat = 111_132.92 - 559.82 * math.cos(2 * rad) + 1.175 * math.cos(4 * rad)
+    m_per_deg_lng = 111_412.84 * math.cos(rad) - 93.5 * math.cos(3 * rad)
+    return m_per_deg_lng, m_per_deg_lat
+
+
+def synthesise_panel_layout(
+    rooftop_polygon: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Lay a south-facing 1.0m × 1.7m panel grid inside lead.rooftop_polygon.
+
+    Returned shape matches the live `panel_layout` document so the frontend
+    cannot tell synthesised panels from Solar API panels:
+
+        {
+          "panels": [{"corners": [[lng,lat]×4], "tilt", "azimuth", "kwh_yr"}],
+          "panel_count": int,
+          "annual_kwh": float,
+          "clipped_at": iso8601,
+          "clip_method": "synthesised_for_demo",
+          "synthesised": True,
+        }
+
+    Returns None if the polygon is missing or unusable.
+    """
+    if not rooftop_polygon:
+        return None
+    coords = rooftop_polygon.get("coordinates") or []
+    if not coords or not coords[0] or len(coords[0]) < 4:
+        return None
+    ring = coords[0]
+
+    # Bounding box.
+    lngs = [p[0] for p in ring]
+    lats = [p[1] for p in ring]
+    min_lng, max_lng = min(lngs), max(lngs)
+    min_lat, max_lat = min(lats), max(lats)
+    centroid_lng, centroid_lat = _polygon_centroid(ring)
+
+    m_per_deg_lng, m_per_deg_lat = _meters_per_degree(centroid_lat)
+
+    # Step in degrees corresponding to one panel + gap.
+    step_x_deg = (PANEL_W_M + PANEL_GAP_M) / m_per_deg_lng
+    step_y_deg = (PANEL_H_M + PANEL_GAP_M) / m_per_deg_lat
+    half_w_deg = (PANEL_W_M / 2.0) / m_per_deg_lng
+    half_h_deg = (PANEL_H_M / 2.0) / m_per_deg_lat
+
+    # Grid origin: snap to half-step inside the bbox so the grid is centred.
+    cols = max(1, int(math.floor((max_lng - min_lng) / step_x_deg)))
+    rows = max(1, int(math.floor((max_lat - min_lat) / step_y_deg)))
+    used_lng_span = cols * step_x_deg
+    used_lat_span = rows * step_y_deg
+    start_lng = min_lng + ((max_lng - min_lng) - used_lng_span) / 2.0 + step_x_deg / 2.0
+    start_lat = min_lat + ((max_lat - min_lat) - used_lat_span) / 2.0 + step_y_deg / 2.0
+
+    panels: list[dict[str, Any]] = []
+    for r in range(rows):
+        for c in range(cols):
+            cx = start_lng + c * step_x_deg
+            cy = start_lat + r * step_y_deg
+            if not _point_in_ring(cx, cy, ring):
+                continue
+            # Build axis-aligned 4-corner panel rectangle (CCW).
+            corners = [
+                [cx - half_w_deg, cy - half_h_deg],
+                [cx + half_w_deg, cy - half_h_deg],
+                [cx + half_w_deg, cy + half_h_deg],
+                [cx - half_w_deg, cy + half_h_deg],
+            ]
+            # All four corners must be inside the polygon — otherwise the panel
+            # would visibly hang over the roof edge.
+            if not all(_point_in_ring(x, y, ring) for x, y in corners):
+                continue
+            panels.append(
+                {
+                    "corners": corners,
+                    "tilt": PANEL_TILT_DEG,
+                    "azimuth": PANEL_AZIMUTH_DEG,
+                    "kwh_yr": PANEL_KWH_YR,
+                }
+            )
+
+    if not panels:
+        # Polygon was too thin / oddly shaped for the grid — at least drop
+        # one panel at the centroid so the frontend still renders something.
+        c_lng, c_lat = centroid_lng, centroid_lat
+        corners = [
+            [c_lng - half_w_deg, c_lat - half_h_deg],
+            [c_lng + half_w_deg, c_lat - half_h_deg],
+            [c_lng + half_w_deg, c_lat + half_h_deg],
+            [c_lng - half_w_deg, c_lat + half_h_deg],
+        ]
+        panels.append(
+            {
+                "corners": corners,
+                "tilt": PANEL_TILT_DEG,
+                "azimuth": PANEL_AZIMUTH_DEG,
+                "kwh_yr": PANEL_KWH_YR,
+            }
+        )
+
+    # Cap to demo target: take an evenly-spaced subset so the layout still
+    # tiles the roof rather than crowding one corner. The CodeNode synthesised
+    # bbox can fit thousands of 1m panels, but the spec wants ~150-200.
+    if len(panels) > SYNTH_TARGET_PANELS:
+        stride = len(panels) / SYNTH_TARGET_PANELS
+        panels = [panels[int(i * stride)] for i in range(SYNTH_TARGET_PANELS)]
+
+    return {
+        "panels": panels,
+        "panel_count": len(panels),
+        "annual_kwh": float(len(panels) * PANEL_KWH_YR),
+        "clipped_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "clip_method": "synthesised_for_demo",
+        "synthesised": True,
+    }
+
+
+async def _get_lead_doc(lead_id: str) -> dict[str, Any] | None:
+    """Direct Atlas read so we can inspect rooftop_polygon for synthesis."""
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    mongo_uri = os.environ.get("MONGO_URI")
+    if not mongo_uri:
+        return None
+    db_name = os.environ.get("MONGO_DB", "solarreach")
+    client = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    try:
+        return await client[db_name].leads.find_one({"_id": lead_id})
+    finally:
+        client.close()
+
+
+async def _persist_panel_layout(lead_id: str, payload: dict[str, Any]) -> None:
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    mongo_uri = os.environ.get("MONGO_URI")
+    if not mongo_uri:
+        return
+    db_name = os.environ.get("MONGO_DB", "solarreach")
+    client = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    try:
+        await client[db_name].leads.update_one(
+            {"_id": lead_id}, {"$set": {"panel_layout": payload}}
+        )
+    finally:
+        client.close()
+
+
+async def _ensure_panels_or_synthesise(
+    http: httpx.AsyncClient, lead_id: str
+) -> dict[str, Any]:
+    """Wrap _ensure_flux_panels with a synth fallback when Solar API returns
+    too few panels (or none) for the CodeNode-shaped corner case.
+    """
+    flux_panels = await _ensure_flux_panels(http, lead_id)
+    panels_payload = flux_panels.get("panels") or {}
+    panel_count = int(panels_payload.get("panel_count") or 0)
+    if panel_count >= SYNTH_MIN_PANELS:
+        return flux_panels
+
+    log.warning(
+        "panels < %d for lead=%s — engaging synthesised fallback",
+        SYNTH_MIN_PANELS,
+        lead_id,
+    )
+    lead_doc = await _get_lead_doc(lead_id)
+    rooftop = (lead_doc or {}).get("rooftop_polygon")
+    synth = synthesise_panel_layout(rooftop)
+    if not synth:
+        flux_panels["synth_skipped"] = "no_rooftop_polygon"
+        return flux_panels
+
+    await _persist_panel_layout(lead_id, synth)
+    flux_panels["panels"] = synth
+    flux_panels["synth_engaged"] = True
+    log.info(
+        "synthesised %d panels for lead=%s (annual_kwh=%.0f)",
+        synth["panel_count"],
+        lead_id,
+        synth["annual_kwh"],
+    )
+    return flux_panels
 
 
 async def _build_org(http: httpx.AsyncClient, lead_id: str) -> dict[str, Any]:
@@ -325,11 +544,13 @@ async def prebake_one(
         "errors": [],
     }
 
-    # Stage 1 — flux + panels
-    flux_panels = await _ensure_flux_panels(http, lead_id)
+    # Stage 1 — flux + panels (with synth fallback for CodeNode-shaped roofs)
+    flux_panels = await _ensure_panels_or_synthesise(http, lead_id)
     record["stages"]["flux_panels"] = flux_panels
     panel_count = ((flux_panels.get("panels") or {}).get("panel_count")) or 0
     record["panel_count"] = int(panel_count)
+    if flux_panels.get("synth_engaged"):
+        record["panels_synthesised"] = True
 
     # Stage 2 — org chart (Opus)
     org = await _build_org(http, lead_id)

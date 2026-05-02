@@ -2,10 +2,15 @@ import { useState } from "react";
 import {
   Bot,
   BrainCircuit,
+  Copy,
   Download,
   FileText,
+  Linkedin,
   Mail,
+  MessageSquare,
   Music,
+  Phone,
+  Send,
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +26,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Badge } from "@/components/ui/Badge";
 import {
   API_BASE,
+  useGenerateOutreach,
   useGeneratePitch,
   useRianAgentRun,
   useRunRianAgent,
@@ -29,7 +35,7 @@ import {
 } from "@/lib/api";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { gbp } from "@/lib/utils";
-import type { Lead } from "@/lib/types";
+import type { Lead, OutreachChannel, OutreachResponse } from "@/lib/types";
 
 interface PitchTabProps {
   lead: Lead;
@@ -39,6 +45,41 @@ interface PitchTabProps {
 const PITCH_COST_CENTS = 10;
 const SWARM_COST_CENTS = 30;
 const RIAN_AGENT_COST_CENTS = 20;
+const OUTREACH_COST_CENTS = 4;
+
+type OutreachVariant = "cyan" | "amber" | "emerald";
+
+interface OutreachChannelMeta {
+  channel: OutreachChannel;
+  label: string;
+  variant: OutreachVariant;
+  Icon: typeof Mail;
+  confirmLabel: string;
+}
+
+const OUTREACH_CHANNELS: OutreachChannelMeta[] = [
+  {
+    channel: "email",
+    label: "EMAIL",
+    variant: "cyan",
+    Icon: Mail,
+    confirmLabel: "Tailored email outreach (Sonnet 4.6)",
+  },
+  {
+    channel: "linkedin",
+    label: "LINKEDIN",
+    variant: "amber",
+    Icon: Linkedin,
+    confirmLabel: "Tailored LinkedIn outreach (Sonnet 4.6)",
+  },
+  {
+    channel: "intro_call",
+    label: "INTRO CALL",
+    variant: "emerald",
+    Icon: Phone,
+    confirmLabel: "Tailored intro-call brief (Sonnet 4.6)",
+  },
+];
 
 export function PitchTab({
   lead,

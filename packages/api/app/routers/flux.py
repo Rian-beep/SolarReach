@@ -137,7 +137,12 @@ async def flux_overlay(
             raise solar_api.SolarAPIError("no annualFluxUrl in dataLayers")
         tiff_bytes = await solar_api.download_geotiff(flux_url, settings)
         out_path = os.path.join(FLUX_DIR, f"{lead_id}.png")
-        meta = solar_api.geotiff_to_inferno_png(tiff_bytes, out_path)
+        # Use the S3-aware variant: same return shape with extra `s3_url`
+        # / `s3_uploaded` keys. S3 mode is auto-detected from env, so this
+        # is a no-op when AWS_* aren't configured.
+        meta = await solar_api.geotiff_to_inferno_png_with_s3(
+            tiff_bytes, out_path, s3_key=f"flux/{lead_id}.png"
+        )
     except (solar_api.SolarAPIError, Exception) as e:  # noqa: BLE001
         log.warning("flux dataLayers/render failed lead=%s err=%s", lead_id, e)
         payload = _mock_payload(lng, lat)
