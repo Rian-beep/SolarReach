@@ -2,12 +2,22 @@ export type LayerKey = "pins" | "radiance" | "panels" | "polygons";
 
 export type LayerState = Record<LayerKey, boolean>;
 
+/** Per-layer count of lead-set members carrying useful data. Drives the
+ *  ·idle / ·n live hint chips. Polygons + pins are always considered live
+ *  (they render off the base lead doc). Radiance/panels light up only when
+ *  some lead in the set actually has cached overlay/layout data. */
+export type LayerDataCounts = Record<LayerKey, number>;
+
 interface HUDLayerToggleProps {
   state: LayerState;
   onChange: (next: LayerState) => void;
-  /** When false, lead-dependent layers (radiance/panels) hint that they
-   *  need a lead selection — but stay clickable. */
-  hasSelectedLead?: boolean;
+  /** Total leads currently rendered. Used as the denominator on the
+   *  `·n/total live` hint, e.g. `·13/264 live` for radiance. */
+  totalLeads?: number;
+  /** How many leads in the current set actually have data for each
+   *  layer. Replaces the previous `hasSelectedLead` gate so the layers
+   *  reflect dataset coverage, not the single-selection state. */
+  dataAvailable?: LayerDataCounts;
   className?: string;
 }
 
@@ -43,7 +53,8 @@ const LAYERS: LayerDef[] = [
 export function HUDLayerToggle({
   state,
   onChange,
-  hasSelectedLead = false,
+  totalLeads = 0,
+  dataAvailable,
   className,
 }: HUDLayerToggleProps) {
   return (
@@ -63,9 +74,12 @@ export function HUDLayerToggle({
       <div className="flex flex-col gap-0.5">
         {LAYERS.map((l) => {
           const on = state[l.key];
-          const ghost = l.needsLead && !hasSelectedLead;
-          // Lead-required layers stay CLICKABLE even without a lead — the
-          // hint just notes when they'll have data to show.
+          // Per-layer data coverage. Lead-dependent layers (radiance/panels)
+          // show ·n/total live when data exists, ·idle otherwise. Always-on
+          // layers (pins/polygons) suppress the hint entirely.
+          const count = dataAvailable?.[l.key] ?? 0;
+          const showCount = l.needsLead && count > 0;
+          const showIdle = l.needsLead && count === 0;
           return (
             <label
               key={l.key}
@@ -98,10 +112,18 @@ export function HUDLayerToggle({
               >
                 {l.label}
               </span>
-              {ghost && (
+              {showCount && (
+                <span
+                  className="text-[9px] uppercase tracking-widest text-cyan tabular-nums"
+                  title={`${count} of ${totalLeads} leads carry data for this layer`}
+                >
+                  ·{count}/{totalLeads} live
+                </span>
+              )}
+              {showIdle && (
                 <span
                   className="text-[9px] uppercase tracking-widest text-grid"
-                  title="select a lead to populate this layer"
+                  title="no leads in the current set carry data for this layer yet"
                 >
                   ·idle
                 </span>

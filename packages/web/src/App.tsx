@@ -7,6 +7,7 @@ import { HUDScale } from "@/components/map3d/HUD-Scale";
 import { HUDLegend } from "@/components/map3d/HUD-Legend";
 import {
   HUDLayerToggle,
+  type LayerDataCounts,
   type LayerState,
 } from "@/components/map3d/HUD-LayerToggle";
 import { LeadDrawer } from "@/components/drawer/LeadDrawer";
@@ -150,6 +151,20 @@ export function App() {
     openDrawer();
   };
 
+  // Per-layer data coverage. Drives the ·n/total live HUD chip so the
+  // RADIANCE/PANELS toggles reflect dataset coverage (e.g. "13/264 live"
+  // for the EC2M cached flux set) instead of the single-selection state.
+  const layerData = useMemo<LayerDataCounts>(
+    () => ({
+      pins: leads.length, // pins always render off the base lead doc
+      polygons: leads.length, // rooftop polygons always render
+      radiance: leads.filter((l) => !!l.flux_overlay?.url).length,
+      panels: leads.filter((l) => (l.panel_layout?.panels?.length ?? 0) > 0)
+        .length,
+    }),
+    [leads],
+  );
+
   return (
     <CostConfirmProvider>
       <div className="flex h-dvh flex-col bg-app-void text-bone">
@@ -188,7 +203,8 @@ export function App() {
                 <HUDLayerToggle
                   state={layers}
                   onChange={setLayers}
-                  hasSelectedLead={selectedLeadId !== null}
+                  totalLeads={leads.length}
+                  dataAvailable={layerData}
                 />
               </ErrorBoundary>
 

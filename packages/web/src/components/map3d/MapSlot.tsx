@@ -288,13 +288,36 @@ export function MapSlot({
       .catch((e) => setLoadErr((e as Error).message));
   }, []);
 
-  // Wire marker click events imperatively
+  // Wire marker click events imperatively.
+  //
+  // The alpha SDK fires `gmp-click` on the host map element BUT the
+  // `event.target` is often the inner shadow-DOM child of the marker
+  // (the SDK's pin sprite element), NOT the `<gmp-marker-3d-interactive-element>`
+  // host that carries `data-lead-id`. Walking `composedPath()` retargets
+  // the click to the first ancestor — across shadow boundaries — that
+  // actually carries the lead id. `closest('[data-lead-id]')` would not
+  // cross shadow roots so we cannot rely on it here.
   useEffect(() => {
     if (!sdkReady || !mapRef.current) return;
     const root = mapRef.current;
     const handler = (e: Event) => {
-      const target = e.target as HTMLElement;
-      const id = target.getAttribute?.("data-lead-id");
+      const path = (e as Event & { composedPath?: () => EventTarget[] })
+        .composedPath?.() ?? [];
+      let id: string | null = null;
+      for (const node of path) {
+        if (
+          node instanceof HTMLElement &&
+          node.hasAttribute?.("data-lead-id")
+        ) {
+          id = node.getAttribute("data-lead-id");
+          break;
+        }
+      }
+      // Fallback for browsers without composedPath (older WebViews).
+      if (!id) {
+        const target = e.target as HTMLElement | null;
+        id = target?.getAttribute?.("data-lead-id") ?? null;
+      }
       if (id) onLeadClick(id);
     };
     root.addEventListener("gmp-click", handler);
@@ -571,18 +594,40 @@ export function MapSlot({
                 key={lead._id}
                 ref={(el) => {
                   if (!el) return;
-                  const mk = el as unknown as Record<string, unknown>;
-                  // Altitude 60m: above most low/mid buildings, below
-                  // tower-block tops. extruded=true draws a stem to ground.
-                  // The marker chip itself renders the SDK's default pin
-                  // sprite (NOT just the label) — clearly visible.
-                  mk.position = { lat, lng, altitude: 60 };
-                  mk.altitudeMode = "RELATIVE_TO_GROUND";
-                  mk.extruded = true;
-                  mk.label = labelText;
+                  // Same upgrade-timing race that hits gmp-map-3d also hits
+                  // the marker element: the alpha SDK upgrades the custom
+                  // element via dynamic library import, and the React ref
+                  // callback can fire BEFORE the upgrade resolves. Setting
+                  // `position`/`altitudeMode`/etc on an un-upgraded
+                  // HTMLElement silently no-ops (the property setters aren't
+                  // installed yet), leaving the marker invisible. Defer via
+                  // customElements.whenDefined so we set props on the
+                  // upgraded element. Attributes (data-*) we set immediately
+                  // so click resolution + CSS selectors work even pre-upgrade.
                   el.setAttribute("data-lead-id", lead._id);
                   el.setAttribute("data-score-band", band);
                   el.setAttribute("data-selected", isSelected ? "1" : "0");
+
+                  const applyProps = () => {
+                    const mk = el as unknown as Record<string, unknown>;
+                    // Altitude 60m: above most low/mid buildings, below
+                    // tower-block tops. extruded=true draws a stem to ground.
+                    // The marker chip itself renders the SDK's default pin
+                    // sprite (NOT just the label) — clearly visible.
+                    mk.position = { lat, lng, altitude: 60 };
+                    mk.altitudeMode = "RELATIVE_TO_GROUND";
+                    mk.extruded = true;
+                    mk.label = labelText;
+                  };
+
+                  if (window.customElements?.whenDefined) {
+                    window.customElements
+                      .whenDefined("gmp-marker-3d-interactive-element")
+                      .then(applyProps)
+                      .catch(() => applyProps());
+                  } else {
+                    applyProps();
+                  }
                 }}
               />
             );
@@ -593,7 +638,13 @@ export function MapSlot({
             orange → yellow). Matches the per-pixel flux PNG colormap so
             the polygons read as 'how much radiance hits this roof' instead
             of arbitrary brand colours. Selected lead = brighter alpha so
-            it pops while neighbouring buildings still tell the heat story. */}
+            it pops while neighbouring buildings still tell the heat story.
+
+            When RADIANCE is toggled on AND the lead carries cached
+            flux_overlay vmin/vmax, we lift the band one stop towards the
+            yellow end proportional to the flux dynamic range — so leads
+            with real Solar API data visibly burn brighter than score-only
+            neighbours. Falls back to score-only when flux data is absent. */}
         {showPolygons &&
           leads.map((lead) => {
             const ring = lead.rooftop_polygon?.coordinates?.[0];
@@ -606,18 +657,34 @@ export function MapSlot({
             const aSel = "DD";
             const aIdle = "B0";
             const a = isSelected ? aSel : aIdle;
+            // Flux brightness boost: (vmax - vmin) / vmax → 0..1 dynamic
+            // range. We bucket into 3 boost levels so the inferno band
+            // shifts deterministically and the audience sees a clear
+            // brightness step instead of an imperceptible alpha tweak.
+            const fx = lead.flux_overlay;
+            const hasFlux = !!(showRadiance && fx?.vmax && fx.vmax > 0);
+            let boost = 0;
+            if (hasFlux) {
+              const vmin = fx?.vmin ?? 0;
+              const vmax = fx?.vmax ?? 1;
+              const range = Math.max(0, (vmax - vmin) / vmax);
+              boost = range >= 0.66 ? 2 : range >= 0.33 ? 1 : 0;
+            }
+            // Effective score = composite + flux boost (each step = one
+            // inferno band brighter, capped at the top stop).
+            const effective = Math.min(100, score + boost * 15);
             let fill: string;
             let stroke: string;
-            if (score >= 80) {
+            if (effective >= 80) {
               fill = `#FCFFA4${a}`; // pale yellow — peak radiance
               stroke = "#FCA40D";
-            } else if (score >= 65) {
+            } else if (effective >= 65) {
               fill = `#F37819${a}`; // orange
               stroke = "#F37819";
-            } else if (score >= 50) {
+            } else if (effective >= 50) {
               fill = `#DD513A${a}`; // red-orange
               stroke = "#DD513A";
-            } else if (score >= 35) {
+            } else if (effective >= 35) {
               fill = `#932667${a}`; // magenta
               stroke = "#932667";
             } else {
@@ -694,18 +761,28 @@ export function MapSlot({
             key="search-target"
             ref={(el) => {
               if (!el) return;
-              const mk = el as unknown as Record<string, unknown>;
-              const t = searchTarget ?? centroid!;
-              mk.position = {
-                lat: t.lat,
-                lng: t.lng,
-                altitude: 80,
-              };
-              mk.altitudeMode = "RELATIVE_TO_GROUND";
-              mk.label = searchTarget
-                ? `◎ ${searchTarget.postcode}`
-                : "◎ SCAN TARGET";
               el.setAttribute("data-search-target", "1");
+              const t = searchTarget ?? centroid!;
+              const applyProps = () => {
+                const mk = el as unknown as Record<string, unknown>;
+                mk.position = {
+                  lat: t.lat,
+                  lng: t.lng,
+                  altitude: 80,
+                };
+                mk.altitudeMode = "RELATIVE_TO_GROUND";
+                mk.label = searchTarget
+                  ? `◎ ${searchTarget.postcode}`
+                  : "◎ SCAN TARGET";
+              };
+              if (window.customElements?.whenDefined) {
+                window.customElements
+                  .whenDefined("gmp-marker-3d-interactive-element")
+                  .then(applyProps)
+                  .catch(() => applyProps());
+              } else {
+                applyProps();
+              }
             }}
           />
         )}
