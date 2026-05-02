@@ -35,6 +35,23 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+
+    # Sync settings → os.environ so subsystems that read os.getenv() directly
+    # (e.g. the swarm package, langchain, voyageai) pick up .env values.
+    # We only fill keys that aren't already exported in the parent shell.
+    import os
+    _env_pairs = {
+        "ANTHROPIC_API_KEY": settings.anthropic_api_key,
+        "MONGO_URI": settings.mongo_uri,
+        "MONGO_DB": settings.mongo_db,
+        "ELEVENLABS_API_KEY": settings.elevenlabs_api_key,
+        "ELEVENLABS_AGENT_ID": settings.elevenlabs_agent_id,
+        "COMPANIES_HOUSE_API_KEY": settings.companies_house_api_key,
+    }
+    for k, v in _env_pairs.items():
+        if v and not os.environ.get(k):
+            os.environ[k] = v
+
     client: AsyncIOMotorClient | None = None
     try:
         client = AsyncIOMotorClient(settings.mongo_uri, serverSelectionTimeoutMS=2000)

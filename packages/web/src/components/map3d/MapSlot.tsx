@@ -63,7 +63,7 @@ declare module "react" {
         "altitude-mode"?: string;
         label?: string;
       };
-      "gmp-polygon-3d-element": React.DetailedHTMLProps<
+      "gmp-polygon-3d": React.DetailedHTMLProps<
         React.HTMLAttributes<HTMLElement>,
         HTMLElement
       > & {
@@ -691,7 +691,7 @@ export function MapSlot({
               fill = `#420A68${a}`; // deep purple — low radiance
               stroke = "#420A68";
             }
-            // gmp-polygon-3d-element wants an array of {lat, lng, altitude}.
+            // gmp-polygon-3d wants an array of {lat, lng, altitude}.
             const outer = ring.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
@@ -707,7 +707,7 @@ export function MapSlot({
               altitude: 50,
             }));
             return (
-              <gmp-polygon-3d-element
+              <gmp-polygon-3d
                 key={`bldg-${lead._id}`}
                 ref={(el) => {
                   if (!el) return;
@@ -738,7 +738,7 @@ export function MapSlot({
               altitude: 55, // 5m above the radiance polygon (50m)
             }));
             return (
-              <gmp-polygon-3d-element
+              <gmp-polygon-3d
                 key={`panel-${selectedLeadId}-${i}`}
                 ref={(el) => {
                   if (!el) return;
