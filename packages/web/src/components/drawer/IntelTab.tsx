@@ -1,4 +1,16 @@
-import { Building2, Network, ShieldCheck, Sun, Timer, UserRound } from "lucide-react";
+import { useState } from "react";
+import {
+  Building2,
+  ChevronDown,
+  ChevronRight,
+  Leaf,
+  Microscope,
+  Network,
+  ShieldCheck,
+  Sun,
+  Timer,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   Card,
@@ -13,7 +25,24 @@ import { API_BASE, useBuildOrg, useDirectors } from "@/lib/api";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { computeRoi, formatYears } from "@/lib/financial";
 import { caption, gbp } from "@/lib/utils";
-import type { Lead } from "@/lib/types";
+import type { Lead, PremisesType } from "@/lib/types";
+
+// Benchmarks per UK commercial premises type. Sources: BEIS commercial PV
+// performance reports + Solar Energy UK 2025 commercial benchmark survey.
+// These drive the "avg in this bracket" callouts in SOLAR METRICS.
+const PREMISES_BENCHMARKS: Record<
+  PremisesType,
+  { paybackYears: number; roiPct: number; annualKwh: number }
+> = {
+  warehouse: { paybackYears: 6.5, roiPct: 12.4, annualKwh: 95_000 },
+  retail: { paybackYears: 7.8, roiPct: 9.6, annualKwh: 32_000 },
+  office: { paybackYears: 8.2, roiPct: 8.9, annualKwh: 28_000 },
+  leisure: { paybackYears: 7.4, roiPct: 10.1, annualKwh: 48_000 },
+  education: { paybackYears: 9.1, roiPct: 7.8, annualKwh: 36_000 },
+};
+
+// 0.193 kg CO2 per kWh — UK 2025 grid carbon intensity (BEIS).
+const KG_CO2_PER_KWH = 0.193;
 
 // Flux PNGs are served by FastAPI's StaticFiles mount under /static/flux/<id>.png.
 // Browser <img> tags hit Vite's dev server unless we absolutise to API_BASE.
@@ -32,6 +61,7 @@ export function IntelTab({ lead }: IntelTabProps) {
   const directors = useDirectors(lead._id);
   const buildOrg = useBuildOrg();
   const { confirm } = useCostConfirm();
+  const [solarMetricsOpen, setSolarMetricsOpen] = useState(true);
 
   const onBuildOrg = async () => {
     const ok = await confirm(5, "Build org chart (Opus inference)");
@@ -205,6 +235,13 @@ export function IntelTab({ lead }: IntelTabProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── SOLAR METRICS · DEEP RESEARCH (collapsible) ────────────────── */}
+      <SolarMetricsCard
+        lead={lead}
+        open={solarMetricsOpen}
+        onToggle={() => setSolarMetricsOpen((o) => !o)}
+      />
 
       {/* ── LAND REGISTRY OWNER ──────────────────────────────────────────── */}
       <Card>
@@ -405,5 +442,202 @@ export function IntelTab({ lead }: IntelTabProps) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ── SOLAR METRICS · DEEP RESEARCH ────────────────────────────────────────
+// Collapsible deep-research breakdown: lifetime energy, lifetime saving,
+// premises-bracket benchmarks, plus links into the REF tab for funding
+// models + tax breaks (already rendered there). All numbers mono.
+
+interface SolarMetricsCardProps {
+  lead: Lead;
+  open: boolean;
+  onToggle: () => void;
+}
+
+function SolarMetricsCard({ lead, open, onToggle }: SolarMetricsCardProps) {
+  const annualKwh = lead.panel_layout?.annual_kwh;
+  const annualSavingGbp = lead.financial?.annual_saving_gbp;
+  const lifetimeKwh = annualKwh ? annualKwh * 25 : undefined;
+  const lifetimeSavingGbp = annualSavingGbp ? annualSavingGbp * 25 : undefined;
+  const annualCo2Kg = annualKwh ? annualKwh * KG_CO2_PER_KWH : undefined;
+  const lifetimeCo2Tonnes = annualCo2Kg ? (annualCo2Kg * 25) / 1000 : undefined;
+  const benchmark = PREMISES_BENCHMARKS[lead.premises_type];
+
+  return (
+    <Card>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-2 p-2.5 text-left hover:bg-app-elev-1 transition-colors duration-[80ms]"
+        aria-expanded={open}
+      >
+        <span className="flex items-center gap-1.5">
+          <Microscope className="size-3.5 text-amber" strokeWidth={1.5} />
+          <span className="text-xs font-medium uppercase tracking-wide text-mute">
+            SOLAR METRICS · DEEP RESEARCH
+          </span>
+        </span>
+        <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-grid">
+          {open ? "COLLAPSE" : "EXPAND"}
+          {open ? (
+            <ChevronDown className="size-3.5" strokeWidth={1.5} />
+          ) : (
+            <ChevronRight className="size-3.5" strokeWidth={1.5} />
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <CardContent className="space-y-3 border-t border-iron pt-2.5">
+          {/* Energy generated */}
+          <div className="space-y-1">
+            <div className={caption}>
+              <span className="text-amber">[ENERGY GENERATED]</span>
+            </div>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>ANNUAL</div>
+                <div className="font-mono text-sm text-bone tabular-nums">
+                  {annualKwh
+                    ? `${annualKwh.toLocaleString()} kWh/yr`
+                    : "— kWh/yr"}
+                </div>
+              </div>
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>25-YR LIFETIME</div>
+                <div className="font-mono text-sm text-bone tabular-nums">
+                  {lifetimeKwh
+                    ? `${lifetimeKwh.toLocaleString()} kWh`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Money saved */}
+          <div className="space-y-1">
+            <div className={caption}>
+              <span className="text-emerald">[MONEY SAVED]</span>
+            </div>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>ANNUAL · GROSS</div>
+                <div className="font-mono text-sm text-emerald tabular-nums">
+                  {annualSavingGbp ? gbp(annualSavingGbp) : "—"}
+                </div>
+              </div>
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>25-YR · GROSS</div>
+                <div className="font-mono text-sm text-emerald tabular-nums">
+                  {lifetimeSavingGbp ? gbp(lifetimeSavingGbp) : "—"}
+                </div>
+              </div>
+            </div>
+            {lead.financial?.npv_25yr_gbp !== undefined && (
+              <div className="font-mono text-[11px] text-dim">
+                NPV (post-discount, 25yr) ·{" "}
+                <span className="text-bone tabular-nums">
+                  {gbp(lead.financial.npv_25yr_gbp)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Sales metrics — premises-type benchmarks */}
+          <div className="space-y-1">
+            <div className={caption}>
+              <span className="text-cyan">
+                [SALES METRICS · {lead.premises_type.toUpperCase()} BRACKET]
+              </span>
+            </div>
+            {benchmark ? (
+              <div className="grid grid-cols-3 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
+                <div className="bg-app-surface px-2 py-1.5">
+                  <div className={caption}>AVG PAYBACK</div>
+                  <div className="font-mono text-sm text-bone tabular-nums">
+                    {benchmark.paybackYears.toFixed(1)} yr
+                  </div>
+                </div>
+                <div className="bg-app-surface px-2 py-1.5">
+                  <div className={caption}>AVG ROI</div>
+                  <div className="font-mono text-sm text-bone tabular-nums">
+                    {benchmark.roiPct.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="bg-app-surface px-2 py-1.5">
+                  <div className={caption}>AVG kWh/YR</div>
+                  <div className="font-mono text-sm text-bone tabular-nums">
+                    {benchmark.annualKwh.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="font-mono text-xs text-dim">
+                [ -- ] no bracket data
+              </p>
+            )}
+          </div>
+
+          {/* CO2 offset */}
+          <div className="space-y-1">
+            <div className={caption}>
+              <span className="text-emerald">[CO2 OFFSET]</span>
+              <span className="text-grid"> · grid intensity 0.193 kg/kWh</span>
+            </div>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>ANNUAL</div>
+                <div className="font-mono text-sm text-bone tabular-nums">
+                  {annualCo2Kg
+                    ? `${annualCo2Kg.toFixed(0)} kg`
+                    : "—"}
+                </div>
+              </div>
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>25-YR</div>
+                <div className="font-mono text-sm text-emerald tabular-nums">
+                  {lifetimeCo2Tonnes
+                    ? `${lifetimeCo2Tonnes.toFixed(1)} t`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Links to REF tab */}
+          <div className="grid grid-cols-2 gap-2">
+            <a
+              href="#ref-funding"
+              className="flex items-center justify-between rounded-[2px] border border-iron bg-app-surface px-2 py-1.5 hover:border-iron-bright transition-colors duration-[80ms]"
+            >
+              <span className="font-mono text-[11px] text-bone uppercase tracking-wide">
+                FUNDING MODELS
+              </span>
+              <span className="font-mono text-[10px] text-cyan">
+                REF →
+              </span>
+            </a>
+            <a
+              href="#ref-tax-breaks"
+              className="flex items-center justify-between rounded-[2px] border border-iron bg-app-surface px-2 py-1.5 hover:border-iron-bright transition-colors duration-[80ms]"
+            >
+              <span className="font-mono text-[11px] text-bone uppercase tracking-wide">
+                <Leaf className="inline size-3 mr-1 text-emerald" strokeWidth={1.5} />
+                TAX BREAKS
+              </span>
+              <span className="font-mono text-[10px] text-cyan">
+                REF →
+              </span>
+            </a>
+          </div>
+          <p className="font-mono text-[10px] text-grid leading-relaxed">
+            SEG · AIA · ECO4 · 0% VAT — see REF tab for full breakdown of
+            UK 2026 incentives across the 5 funding models.
+          </p>
+        </CardContent>
+      )}
+    </Card>
   );
 }
