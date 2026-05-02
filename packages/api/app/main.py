@@ -25,6 +25,7 @@ from app.routers import integration as integration_router
 from app.routers import leads as leads_router
 from app.routers import panels as panels_router
 from app.routers import realapi as realapi_router
+from app.routers import rian as rian_router
 from app.routers import scan as scan_router
 from app.routers import swarm as swarm_router
 from app.routers import voice as voice_router
@@ -132,6 +133,7 @@ def create_app() -> FastAPI:
     app.include_router(inbound_router.router, tags=["inbound"])
     app.include_router(integration_router.router, tags=["integration"])
     app.include_router(realapi_router.router, tags=["realapi"])
+    app.include_router(rian_router.router, tags=["rian"])
     app.include_router(swarm_router.router, tags=["swarm"])
     # Static (generated decks/pdfs)
     static_dir = Path("/tmp/decks")
