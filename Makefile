@@ -152,6 +152,13 @@ demo-reset:  ## wipe spend tracker, drop audit_log, clear caches
 demo-prefetch:  ## pre-fetch flux + panels for top 5 leads (avoid live cost during demo)
 	@bash "$(ROOT)/scripts/demo_prefetch.sh"
 
+.PHONY: prebake-demo
+prebake-demo:  ## pre-bake CodeNode + top-12 EC2M 7EB leads (deck/PDF/voice/flux/panels) into data/demo-bundle/
+	@printf "$(CYAN)→ pre-baking demo bundle to data/demo-bundle/$(RESET)\n"
+	@cd "$(ROOT)" && \
+		export MONGO_URI=$$(grep ^MONGO_URI= .env.local | sed 's/^MONGO_URI=//') && \
+		"$(ROOT)/packages/api/.venv/bin/python" "$(ROOT)/scripts/prebake_demo.py"
+
 .PHONY: demo-fallback-flux
 demo-fallback-flux:  ## switch flux endpoint to pre-cached PNGs (Solar API outage fallback)
 	@$(COMPOSE) exec -T api sh -c 'echo "USE_CACHED_FLUX=1" >> /tmp/runtime.env' || true

@@ -34,6 +34,7 @@ node_modules/
 # data — never commit raw govt zips or extracts
 data/raw/
 data/processed/
+data/demo-bundle/
 data/*.zip
 data/*.gml
 data/*.csv
