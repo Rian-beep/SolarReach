@@ -3,6 +3,7 @@
 from .financial import composite_score, roi_gate, capex, payback_years, npv_25yr
 from .compliance import hash_recipient, is_live_outbound
 from . import constants
+from . import industry_benchmarks
 from . import models
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "hash_recipient",
     "is_live_outbound",
     "constants",
+    "industry_benchmarks",
     "models",
 ]
 
