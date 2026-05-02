@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { useScan, API_BASE } from "@/lib/api";
@@ -6,6 +6,10 @@ import { formatPostcode } from "@/lib/utils";
 import { useLeadStore } from "@/stores/useLeadStore";
 import type { Lead } from "@/lib/types";
 import { SpendIndicator } from "./SpendIndicator";
+
+// SSE reconnect tuning — covers Mongo blips / Atlas fail-overs mid-demo.
+// Backoff: 1s → 2s → 4s → 8s → 8s, then give up.
+const SSE_BACKOFFS_MS = [1_000, 2_000, 4_000, 8_000, 8_000] as const;
 
 export type AppMode = "map" | "calculator" | "admin";
 
@@ -19,6 +23,80 @@ export function Header({ mode, onModeChange, atlasStatus = "live" }: HeaderProps
   const [postcode, setPostcode] = useState("");
   const scan = useScan();
   const addLead = useLeadStore((s) => s.addLead);
+
+  // Track the live EventSource + reconnect timer so unmount tears down cleanly
+  // and a second SCAN click cancels the previous stream.
+  const esRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      esRef.current?.close();
+      esRef.current = null;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const openScanStream = (streamUrl: string) => {
+    // Tear down any prior stream before opening a new one.
+    esRef.current?.close();
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    let attempt = 0; // reset to 0 on every successful event
+    let done = false;
+
+    const connect = () => {
+      const es = new EventSource(streamUrl, { withCredentials: false });
+      esRef.current = es;
+
+      es.addEventListener("lead", (ev) => {
+        attempt = 0; // healthy traffic — reset backoff
+        try {
+          const lead = JSON.parse((ev as MessageEvent).data) as Lead;
+          addLead(lead);
+        } catch {
+          // ignore malformed event
+        }
+      });
+
+      es.addEventListener("progress", () => {
+        attempt = 0;
+      });
+
+      es.addEventListener("done", () => {
+        done = true;
+        es.close();
+        esRef.current = null;
+      });
+
+      es.addEventListener("error", () => {
+        // EventSource fires "error" on both transient drops (readyState=CONNECTING)
+        // and permanent close (readyState=CLOSED). We treat both as a drop and
+        // reconnect manually — gives us bounded retries instead of the browser's
+        // unbounded default.
+        if (done) return;
+        es.close();
+        esRef.current = null;
+
+        if (attempt >= SSE_BACKOFFS_MS.length) {
+          toast.error("Lost connection to scan stream — please retry");
+          return;
+        }
+        const delay = SSE_BACKOFFS_MS[attempt];
+        attempt += 1;
+        reconnectTimerRef.current = setTimeout(connect, delay);
+      });
+    };
+
+    connect();
+  };
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -37,17 +115,7 @@ export function Header({ mode, onModeChange, atlasStatus = "live" }: HeaderProps
       const streamUrl = res.stream_url.startsWith("http")
         ? res.stream_url
         : `${API_BASE}${res.stream_url}`;
-      const es = new EventSource(streamUrl, { withCredentials: false });
-      es.addEventListener("lead", (ev) => {
-        try {
-          const lead = JSON.parse((ev as MessageEvent).data) as Lead;
-          addLead(lead);
-        } catch {
-          // ignore malformed event
-        }
-      });
-      es.addEventListener("done", () => es.close());
-      es.addEventListener("error", () => es.close());
+      openScanStream(streamUrl);
     } catch (err) {
       toast.error(`Scan failed: ${(err as Error).message}`);
     }
