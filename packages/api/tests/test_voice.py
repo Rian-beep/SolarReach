@@ -133,3 +133,98 @@ def test_get_provider_explicit_arg_wins(monkeypatch):
     monkeypatch.setenv("VOICE_PROVIDER", "elevenlabs")
     p = get_provider("rian")
     assert isinstance(p, RianProjectVoiceProvider)
+
+
+# ─── /voice/pitch_audio ───────────────────────────────────────────────────────
+
+
+def test_voice_pitch_audio_404_for_unknown_lead(client):
+    r = client.post("/voice/pitch_audio", json={"lead_id": "does_not_exist"})
+    assert r.status_code == 404
+
+
+def test_voice_pitch_audio_demo_mode_without_elevenlabs_key(
+    client, monkeypatch, seeded_lead
+):
+    """No ELEVENLABS_API_KEY → 200 + status=demo_mode + script populated.
+
+    The Anthropic key is also empty in the test env, so the script comes from
+    the deterministic fallback inside generate_voice_pitch.
+    """
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    r = client.post("/voice/pitch_audio", json={"lead_id": seeded_lead})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "demo_mode"
+    assert body["audio_url"] is None
+    # Fallback script is still useful — must mention the building.
+    assert "Old Street" in body["script"]
+    assert body["duration_sec"] > 0
+
+
+def test_voice_pitch_audio_writes_mp3_when_tts_succeeds(
+    client, monkeypatch, seeded_lead, tmp_path
+):
+    """With a fake ElevenLabs response, the route should write an mp3 file
+    under /tmp/swarm-tts and return a /static/swarm/tts/* URL."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "fake-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    fake_mp3 = b"ID3\x03" + b"\x00" * 1024  # not real audio, but non-empty bytes
+
+    async def _fake_synth(*, text, voice_id, api_key, out_path, timeout=60.0):
+        from pathlib import Path
+
+        Path(out_path).write_bytes(fake_mp3)
+        return True, "", len(fake_mp3)
+
+    from app.routers import voice as voice_router
+
+    monkeypatch.setattr(voice_router, "_synthesize_tts", _fake_synth)
+
+    r = client.post("/voice/pitch_audio", json={"lead_id": seeded_lead})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["audio_url"] == f"/static/swarm/tts/pitch_{seeded_lead}.mp3"
+    assert body["script"]
+    assert body["duration_sec"] > 0
+    assert body["cost_cents"] >= 25  # at minimum the TTS line item
+
+    from pathlib import Path
+
+    assert Path(f"/tmp/swarm-tts/pitch_{seeded_lead}.mp3").exists()
+
+
+def test_voice_pitch_audio_upstream_error_when_tts_fails(
+    client, monkeypatch, seeded_lead
+):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "fake-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    async def _fake_synth(**_kwargs):
+        return False, "tts_http_401:bad key", 0
+
+    from app.routers import voice as voice_router
+
+    monkeypatch.setattr(voice_router, "_synthesize_tts", _fake_synth)
+
+    r = client.post("/voice/pitch_audio", json={"lead_id": seeded_lead})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "upstream_error"
+    assert body["audio_url"] is None
+    assert "401" in body["message"]
+    # Script is still returned so the UI can show the rehearsal text.
+    assert body["script"]
