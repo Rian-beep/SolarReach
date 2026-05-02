@@ -163,34 +163,111 @@ async def pitch(
     lead_id: str,
     body: PitchRequest,
     db: AsyncIOMotorDatabase = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
 ):
+    """Real codex-driven pitch generation: Sonnet 4.6 → JSON spec → PPTX → PDF."""
     lead = await db.leads.find_one({"_id": lead_id})
     if not lead:
         raise HTTPException(404, "lead not found")
+
+    # Look up client config for branding
+    client_doc = await db.clients.find_one({"_id": body.client_id}) or {}
+    decision_maker = lead.get("decision_maker") or {
+        "name": "Decision Maker",
+        "role": "Director",
+        "confidence": 0.5,
+        "rationale": "default — call /build_org to refine",
+    }
+
+    pitch_id = f"pitch_{uuid.uuid4()}"
+
+    # Real Anthropic deck generation — soft-fail to stub on any error
+    deck_json: dict[str, Any] = {}
+    emails: dict[str, str] = {}
+    cost_cents_total = 0
+    pptx_url: str | None = None
+    pdf_url: str | None = None
+    used_real = False
+    err_msg: str | None = None
+
+    try:
+        from codex_brain.anthropic_client import AnthropicClient
+        from codex_brain.generators.deck import generate_deck
+        from codex_brain.generators.email import generate_email_variants
+        from codex_brain.generators.pptx_renderer import render_pptx
+        from codex_brain.generators.pdf_converter import pptx_to_pdf
+
+        if not settings.anthropic_api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY missing")
+
+        client = AnthropicClient(api_key=settings.anthropic_api_key)
+
+        deck_result = await generate_deck(lead, client, decision_maker)
+        deck_json = deck_result.deck_json
+        cost_cents_total += int(deck_result.cost_cents)
+
+        emails_obj = await generate_email_variants(lead, decision_maker, client)
+        # Flatten {a:{subject,body}, b:{...}} → strings the frontend expects
+        for k, v in emails_obj.items():
+            if isinstance(v, dict):
+                subj = v.get("subject", "")
+                body_txt = v.get("body", "")
+                emails[k] = f"Subject: {subj}\n\n{body_txt}".strip()
+            else:
+                emails[k] = str(v)
+
+        # Render PPTX + PDF
+        brand = (client_doc.get("branding") or {}) | {"primary": "#1FB6FF", "accent": "#FFB020"}
+        pptx_path = render_pptx(deck_json, brand=brand, lead_id=pitch_id, out_dir="/tmp/decks")
+        pptx_url = f"/static/pitches/{pptx_path.name}"
+        try:
+            pdf_path = pptx_to_pdf(pptx_path, out_dir="/tmp/decks")
+            pdf_url = f"/static/pitches/{pdf_path.name}"
+        except Exception as e:  # libreoffice may be missing locally
+            log.warning("pdf conversion skipped: %s", e)
+        used_real = True
+    except Exception as e:  # noqa: BLE001
+        err_msg = str(e)
+        log.exception("real pitch failed, falling back to stub: %s", e)
+
+    # Audit (real cost)
     await log_audit(
         db,
         action="lead.pitch",
         lead_id=lead_id,
-        cost_cents=0,
-        metadata={"client_id": body.client_id, "stub": True},
-    )
-    log.info("# A2 STUB pitch lead=%s", lead_id)
-    pitch_id = f"pitch_{uuid.uuid4()}"
-    base = f"/static/pitches/{pitch_id}"
-    # TODO(A4): codex generates real PPTX/PDF; for now return mock URLs.
-    payload = {
-        "pptx_url": f"{base}.pptx",
-        "pdf_url": f"{base}.pdf",
-        "emails": {
-            "a": "Subject: Solar partnership for {{company}}\n\nHi {{name}}, ...",
-            "b": "Subject: Cutting your energy bill\n\nHi {{name}}, ...",
+        cost_cents=cost_cents_total,
+        metadata={
+            "client_id": body.client_id,
+            "stub": not used_real,
+            "error": err_msg,
+            "model": "claude-sonnet-4-6" if used_real else None,
         },
-        "deck_json": {
+    )
+
+    # Fallback stub shape if real call failed (matches contract)
+    if not used_real:
+        deck_json = {
+            "title": {"headline": "Solar proposal"},
             "slides": [
                 {"title": "Why Solar, Why Now", "bullets": ["ROI", "ESG", "Resilience"]},
                 {"title": "Your Building", "bullets": [lead.get("address", "")]},
-            ]
-        },
+            ],
+        }
+        emails = {
+            "a": f"Subject: Solar partnership for {lead.get('owner', {}).get('company_name', 'your company')}\n\nHi {decision_maker.get('name', 'there')}, …",
+            "b": "Subject: Cutting your energy bill\n\n…",
+        }
+        base = f"/static/pitches/{pitch_id}"
+        pptx_url = f"{base}.pptx"
+        pdf_url = f"{base}.pdf"
+
+    payload = {
+        "pptx_url": pptx_url,
+        "pdf_url": pdf_url,
+        "emails": emails,
+        "deck_json": deck_json,
+        "cost_cents": cost_cents_total,
+        "used_real": used_real,
     }
     await db.leads.update_one({"_id": lead_id}, {"$set": {"pitch": payload}})
     return JSONResponse(payload)

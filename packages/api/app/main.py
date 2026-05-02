@@ -8,8 +8,11 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.config import get_settings
@@ -82,6 +85,10 @@ def create_app() -> FastAPI:
     app.include_router(financial_router.router, tags=["financial"])
     app.include_router(inbound_router.router, tags=["inbound"])
     app.include_router(realapi_router.router, tags=["realapi"])
+    # Static (generated decks/pdfs)
+    static_dir = Path("/tmp/decks")
+    static_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static/pitches", StaticFiles(directory=str(static_dir)), name="pitches")
     return app
 
 

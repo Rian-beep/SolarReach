@@ -23,6 +23,7 @@ dependencies = [
     "celery>=5.4",
     "python-multipart",
     "solarreach-shared",
+    "codex-brain",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ dev = [
 
 [tool.uv.sources]
 solarreach-shared = { path = "../shared/py", editable = true }
+codex-brain = { path = "../codex", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
