@@ -581,31 +581,36 @@ export function MapSlot({
             by composite_score on a TRUE INFERNO gradient (purple → red →
             orange → yellow). Matches the per-pixel flux PNG colormap so
             the polygons read as 'how much radiance hits this roof' instead
-            of arbitrary brand colours. */}
+            of arbitrary brand colours. Selected lead = brighter alpha so
+            it pops while neighbouring buildings still tell the heat story. */}
         {showPolygons &&
           leads.map((lead) => {
             const ring = lead.rooftop_polygon?.coordinates?.[0];
             if (!ring || ring.length < 3) return null;
             const score = lead.scores?.composite_score ?? 0;
+            const isSelected = lead._id === selectedLeadId;
             // Inferno stops (matplotlib-aligned). Higher score = brighter heat.
-            // Each fill ends in '50' = 80/255 alpha = readable on light + dark
-            // photorealistic surfaces.
+            // Selected lead uses CC alpha (80%); others use B0 (~70%) so the
+            // demo audience can see the radiance grid even without a click.
+            const aSel = "DD";
+            const aIdle = "B0";
+            const a = isSelected ? aSel : aIdle;
             let fill: string;
             let stroke: string;
             if (score >= 80) {
-              fill = "#FCFFA450"; // pale yellow — peak radiance
+              fill = `#FCFFA4${a}`; // pale yellow — peak radiance
               stroke = "#FCA40D";
             } else if (score >= 65) {
-              fill = "#F37819A0"; // orange
+              fill = `#F37819${a}`; // orange
               stroke = "#F37819";
             } else if (score >= 50) {
-              fill = "#DD513AA0"; // red-orange
+              fill = `#DD513A${a}`; // red-orange
               stroke = "#DD513A";
             } else if (score >= 35) {
-              fill = "#932667A0"; // magenta
+              fill = `#932667${a}`; // magenta
               stroke = "#932667";
             } else {
-              fill = "#420A68A0"; // deep purple — low radiance
+              fill = `#420A68${a}`; // deep purple — low radiance
               stroke = "#420A68";
             }
             // gmp-polygon-3d-element wants an array of {lat, lng, altitude}.
@@ -633,14 +638,17 @@ export function MapSlot({
           })}
 
         {/* Per-panel cyan polygons — only when PANELS layer toggled on AND
-            the selected lead has a clipped panel layout from Solar API. */}
+            the selected lead has a clipped panel layout from Solar API.
+            Altitude 14m so they float clearly ABOVE the radiance polygon
+            (which sits at 6m). Panel fill is solid-cyan (D0 alpha) so they
+            read as engineered hardware on top of the heat overlay. */}
         {showPanels &&
           panelLayout?.panels?.map((p, i) => {
             if (!p.corners || p.corners.length < 3) return null;
             const outer = p.corners.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
-              altitude: 8,
+              altitude: 14,
             }));
             return (
               <gmp-polygon-3d-element
@@ -650,8 +658,8 @@ export function MapSlot({
                   const pp = el as unknown as Record<string, unknown>;
                   pp.outerCoordinates = outer;
                   pp.altitudeMode = "RELATIVE_TO_GROUND";
-                  pp.fillColor = "#1FB6FF66";
-                  pp.strokeColor = "#1FB6FF";
+                  pp.fillColor = "#1FB6FFD0"; // cyan, ~80% opaque
+                  pp.strokeColor = "#0891B2"; // deeper cyan stroke
                   pp.strokeWidth = 1;
                 }}
               />
