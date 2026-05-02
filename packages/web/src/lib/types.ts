@@ -119,12 +119,25 @@ export interface Spend {
   budget_pct: number;
 }
 
+export interface PricingTier {
+  id: "starter" | "pro" | "enterprise";
+  name: string;
+  price_gbp: number;
+  features: string[];
+}
+
 export interface Client {
   _id: string;
   name: string;
   branding: { primary: string; logo_url?: string };
   pricing: { panel_unit_gbp: number; install_per_kw_gbp: number };
   session_budget_gbp: number;
+  // Admin Centre extensions (optional — older docs may not have them)
+  product_description?: string;
+  product_features?: string[];
+  warranty_terms?: string;
+  pricing_tiers?: PricingTier[];
+  expertise_notes?: string;
 }
 
 export interface ScanResponse {
@@ -171,4 +184,29 @@ export interface TranscriptChunk {
   role: "agent" | "user" | "system";
   text: string;
   ts: number;
+}
+
+// ─── Swarm ────────────────────────────────────────────────────────────────
+
+export interface SwarmArtifacts {
+  pptx_url: string | null;
+  mp3_url: string | null;
+  research_bullets: string[];
+}
+
+export type SwarmJobStatus = "queued" | "running" | "done" | "error";
+
+export interface SwarmRunResponse {
+  job_id: string;
+  status: SwarmJobStatus;
+}
+
+export interface SwarmJob {
+  job_id: string;
+  status: SwarmJobStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  result: string | null;
+  error: string | null;
+  artifacts: SwarmArtifacts | null;
 }

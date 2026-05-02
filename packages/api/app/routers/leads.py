@@ -400,7 +400,9 @@ async def pitch(
         deck_json = deck_result.deck_json
         cost_cents_total += int(deck_result.cost_cents)
 
-        emails_obj = await generate_email_variants(lead, decision_maker, client)
+        emails_obj = await generate_email_variants(
+            lead, decision_maker, client, client_doc=client_doc
+        )
         # Flatten {a:{subject,body}, b:{...}} → strings the frontend expects
         for k, v in emails_obj.items():
             if isinstance(v, dict):

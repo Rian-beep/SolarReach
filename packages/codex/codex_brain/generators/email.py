@@ -1,4 +1,9 @@
-"""Email A/B variant generator — Sonnet 4.6."""
+"""Email A/B variant generator — Sonnet 4.6.
+
+Reads optional ``client_doc`` from the admin centre to splice subject-expertise
+notes + product description into the system prompt. This makes the outreach
+sound like a domain-specialist account exec, not a generic SDR.
+"""
 
 from __future__ import annotations
 
@@ -36,14 +41,57 @@ def _fallback_variants(lead: dict[str, Any], dm: dict[str, Any]) -> dict[str, di
     }
 
 
+def _build_subject_expertise_block(client_doc: dict[str, Any] | None) -> str:
+    """Return a markdown block to append to the email system prompt, or "".
+
+    Reads ``expertise_notes`` and ``product_description`` from the admin
+    centre's clients doc. Empty/missing fields are skipped silently.
+    """
+    if not client_doc:
+        return ""
+    expertise = (client_doc.get("expertise_notes") or "").strip()
+    product = (client_doc.get("product_description") or "").strip()
+    features = client_doc.get("product_features") or []
+    if not (expertise or product or features):
+        return ""
+
+    parts: list[str] = ["", "## Subject expertise"]
+    parts.append(
+        "You are writing on behalf of a vendor with the following positioning. "
+        "Reflect this expertise concretely (one specific reference / fact), "
+        "do NOT list it verbatim."
+    )
+    if product:
+        parts.append(f"Product: {product}")
+    if features:
+        bullet_lines = "\n".join(f"- {f}" for f in features if isinstance(f, str) and f.strip())
+        if bullet_lines:
+            parts.append("Key features:\n" + bullet_lines)
+    if expertise:
+        parts.append(f"Expertise notes: {expertise}")
+    return "\n\n".join(parts)
+
+
 async def generate_email_variants(
     lead: dict[str, Any],
     decision_maker: dict[str, Any],
     client: AnthropicClient,
     *,
     model: str = SONNET_MODEL,
+    client_doc: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, str]]:
+    """Generate two email variants for ``lead`` addressed to ``decision_maker``.
+
+    If ``client_doc`` (the admin centre's ``clients`` doc) is provided, its
+    ``expertise_notes`` + ``product_description`` are spliced into the
+    system prompt. We pass it in via the call site so the cache hits on
+    the base prompt and only the expertise tail busts cache when admin
+    changes (rare).
+    """
     system = load_prompt("email_system.md")
+    expertise_block = _build_subject_expertise_block(client_doc)
+    if expertise_block:
+        system = system + expertise_block
     fin = lead.get("financial") or {}
     payload = {
         "lead": {

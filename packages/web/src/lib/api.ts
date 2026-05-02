@@ -14,6 +14,7 @@ import type {
   Lead,
   PanelLayout,
   PitchResponse,
+  PricingTier,
   ScanResponse,
   Spend,
   VoiceSignedUrl,
@@ -248,6 +249,12 @@ export interface AdminPayload {
   branding?: { primary?: string; logo_url?: string };
   pricing?: { panel_unit_gbp?: number; install_per_kw_gbp?: number };
   session_budget_gbp?: number;
+  // Admin Centre extensions — fed downstream into pitch/email generators.
+  product_description?: string;
+  product_features?: string[];
+  warranty_terms?: string;
+  pricing_tiers?: PricingTier[];
+  expertise_notes?: string;
 }
 
 export function useSaveAdmin(): UseMutationResult<

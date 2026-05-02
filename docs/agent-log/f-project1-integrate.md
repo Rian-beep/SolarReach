@@ -72,5 +72,16 @@
 
 ### Verify
 
-- `pnpm typecheck` — see commit summary
-- `uv run pytest -q` — see commit summary
+- `pnpm typecheck` (web) — clean
+- `uv run pytest -q` (api) — 49 passed (6 new in test_project1_link.py)
+- `uv run pytest -q` (codex) — 42 passed (4 new in test_email.py)
+
+### Notes for orchestrator
+
+- Task 3 (solar-metrics card) was already swept into commit `f463c84`
+  ("aggregate agent work — IntelTab solar metrics") by the orchestrator
+  before this branch could commit it. The card is in place, working,
+  and matches the spec.
+- Tasks 1+2 landed in `92f47ba` (atlas linkage + outreach event endpoint)
+- Tasks 4+5 land in this commit (admin extensions + email expertise splice)
+- No changes to MapSlot.tsx, App.tsx, Header.tsx, HUD-*.tsx, or .env.local.
