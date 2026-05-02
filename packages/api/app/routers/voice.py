@@ -21,10 +21,15 @@ from app.services.audit import log_audit
 router = APIRouter()
 log = logging.getLogger("solarreach.api.voice")
 
+# Candidate locations for the AI-disclosure system prompt. The hackathon
+# build keeps the canonical copy at the repo root (`agent_system.md`); the
+# packages/voice paths are kept for the future split-out service.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _PROMPT_PATH_CANDIDATES = [
+    _REPO_ROOT / "agent_system.md",
+    _REPO_ROOT / "packages/voice/voice_service/prompts/agent_system.md",
+    Path("agent_system.md"),
     Path("packages/voice/voice_service/prompts/agent_system.md"),
-    Path(__file__).resolve().parents[4] / "voice/voice_service/prompts/agent_system.md",
-    Path(__file__).resolve().parents[3] / "packages/voice/voice_service/prompts/agent_system.md",
 ]
 
 

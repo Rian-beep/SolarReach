@@ -86,6 +86,14 @@ async def create_scan(
         lead_count,
     )
 
+    # Persist the actual lead_count so the SSE stream can quote it as the
+    # `progress.total` — that way `scan.lead_count`, every `progress.total`,
+    # and the final `done.lead_count` all agree (CONTRACTS § 3).
+    await db.scan_jobs.update_one(
+        {"_id": scan_id},
+        {"$set": {"lead_count": lead_count, "status": "matched"}},
+    )
+
     return ScanResponse(
         scan_id=scan_id,
         lead_count=lead_count,
@@ -102,6 +110,11 @@ async def stream_scan(
     if not job:
         raise HTTPException(status_code=404, detail="scan not found")
 
+    # Use the persisted lead_count (set by POST /scan) as the progress total
+    # so frontend progress bars don't claim "12 / 50" when only 12 real leads
+    # exist. Falls back to job["limit"] for legacy jobs created before this fix.
+    total = int(job.get("lead_count", job.get("limit", 0)))
+
     async def event_gen():
         completed = 0
         async for lead in iter_new_leads(
@@ -111,7 +124,7 @@ async def stream_scan(
             yield {"event": "lead", "data": json.dumps(lead, default=str)}
             yield {
                 "event": "progress",
-                "data": json.dumps({"completed": completed, "total": job["limit"]}),
+                "data": json.dumps({"completed": completed, "total": total}),
             }
             # Yield to event loop briefly so SSE flushes.
             await asyncio.sleep(0)

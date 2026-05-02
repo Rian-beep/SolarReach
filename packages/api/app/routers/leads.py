@@ -419,23 +419,55 @@ async def pitch_download(
     format: str = Query(default="pdf", pattern="^(pdf|pptx)$"),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    """Resolve `lead.pitch.{pdf_url,pptx_url}` (set by POST /lead/<id>/pitch)
+    and stream the actual rendered file from disk.
+
+    No stub fallback — if the file is missing, return 404 so callers know the
+    pitch hasn't been generated (or the real renderer failed for that lead).
+    """
     lead = await db.leads.find_one({"_id": lead_id})
     if not lead:
         raise HTTPException(404, "lead not found")
-    static_dir = Path(os.environ.get("SOLARREACH_STATIC_DIR", "static")) / "pitches"
-    static_dir.mkdir(parents=True, exist_ok=True)
-    # If the real renderer produced a file under /tmp/decks, that path is exposed
-    # via /static/pitches; this fallback keeps download testable when no pitch
-    # has been generated yet (writes a sentinel header only).
-    fname = f"{lead_id}.{format}"
-    fpath = static_dir / fname
-    if not fpath.exists():
-        fpath.write_bytes(b"%PDF-stub\n" if format == "pdf" else b"PK\x03\x04stub")
+
+    pitch = lead.get("pitch") or {}
+    url_key = "pdf_url" if format == "pdf" else "pptx_url"
+    url = pitch.get(url_key)
+    if not url:
+        raise HTTPException(
+            404,
+            f"no {format} pitch generated for this lead — call POST /lead/{lead_id}/pitch first",
+        )
+
+    # Map persisted URL → filesystem path. URLs look like `/static/pitches/<name>`
+    # and map to the StaticFiles mount in main.py (default /tmp/decks). We trust
+    # the URL we wrote ourselves; resolve relative to the mount root and reject
+    # anything that escapes it.
+    pitches_url_prefix = "/static/pitches/"
+    if not url.startswith(pitches_url_prefix):
+        raise HTTPException(404, f"unrecognised pitch url: {url}")
+    filename = url[len(pitches_url_prefix):]
+    pitches_root = Path(os.environ.get("SOLARREACH_PITCHES_DIR", "/tmp/decks"))
+    fpath = (pitches_root / filename).resolve()
+    # Path-traversal guard: refuse anything outside the pitches root.
+    try:
+        fpath.relative_to(pitches_root.resolve())
+    except ValueError:
+        raise HTTPException(404, "invalid pitch path")
+
+    if not fpath.exists() or not fpath.is_file():
+        raise HTTPException(
+            404,
+            f"pitch file missing on disk: {filename} — re-run POST /lead/{lead_id}/pitch",
+        )
+
     return FileResponse(
         path=str(fpath),
-        filename=fname,
-        media_type="application/pdf" if format == "pdf" else
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=fpath.name,
+        media_type=(
+            "application/pdf"
+            if format == "pdf"
+            else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ),
     )
 
 

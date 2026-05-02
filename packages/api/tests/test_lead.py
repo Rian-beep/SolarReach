@@ -6,6 +6,79 @@ from app.services.companies_house import CH_BASE_URL
 
 
 @pytest.mark.asyncio
+async def test_pitch_download_404_when_no_pitch_generated(client, mock_db):
+    """No pitch ever generated → 404, never an 8-byte stub."""
+    await mock_db.leads.insert_one({"_id": "lead_nopitch"})
+    r = client.get("/lead/lead_nopitch/pitch/download?format=pdf")
+    assert r.status_code == 404
+    assert "no pdf pitch" in r.text.lower() or "not generated" in r.text.lower() or "no pdf" in r.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_pitch_download_serves_persisted_pdf(client, mock_db, tmp_path, monkeypatch):
+    """`lead.pitch.pdf_url` resolves to disk and FileResponse streams it."""
+    pitches_dir = tmp_path / "decks"
+    pitches_dir.mkdir()
+    real_pdf = pitches_dir / "pitch_abc.pdf"
+    real_pdf.write_bytes(b"%PDF-1.7\nrealcontent\n%%EOF")
+    monkeypatch.setenv("SOLARREACH_PITCHES_DIR", str(pitches_dir))
+
+    await mock_db.leads.insert_one(
+        {
+            "_id": "lead_withpitch",
+            "pitch": {
+                "pdf_url": "/static/pitches/pitch_abc.pdf",
+                "pptx_url": "/static/pitches/pitch_abc.pptx",
+            },
+        }
+    )
+    r = client.get("/lead/lead_withpitch/pitch/download?format=pdf")
+    assert r.status_code == 200, r.text
+    body = r.content
+    # Must be the actual file, not the 8-byte stub.
+    assert body.startswith(b"%PDF-1.7"), f"got: {body[:40]!r}"
+    assert len(body) > 16
+
+
+@pytest.mark.asyncio
+async def test_pitch_download_404_when_url_set_but_file_missing(
+    client, mock_db, tmp_path, monkeypatch
+):
+    """`lead.pitch.pdf_url` exists in Mongo but file gone from disk → 404."""
+    pitches_dir = tmp_path / "decks"
+    pitches_dir.mkdir()
+    monkeypatch.setenv("SOLARREACH_PITCHES_DIR", str(pitches_dir))
+
+    await mock_db.leads.insert_one(
+        {
+            "_id": "lead_ghostpitch",
+            "pitch": {"pdf_url": "/static/pitches/missing.pdf"},
+        }
+    )
+    r = client.get("/lead/lead_ghostpitch/pitch/download?format=pdf")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pitch_download_rejects_path_traversal(
+    client, mock_db, tmp_path, monkeypatch
+):
+    """A persisted URL trying to escape the pitches root must 404, not leak files."""
+    pitches_dir = tmp_path / "decks"
+    pitches_dir.mkdir()
+    monkeypatch.setenv("SOLARREACH_PITCHES_DIR", str(pitches_dir))
+
+    await mock_db.leads.insert_one(
+        {
+            "_id": "lead_evil",
+            "pitch": {"pdf_url": "/static/pitches/../../../etc/passwd"},
+        }
+    )
+    r = client.get("/lead/lead_evil/pitch/download?format=pdf")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_get_lead_returns_full_doc(client, mock_db):
     await mock_db.leads.insert_one(
         {
