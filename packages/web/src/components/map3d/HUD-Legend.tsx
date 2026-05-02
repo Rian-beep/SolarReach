@@ -19,8 +19,10 @@ export function HUDLegend({ vmin = 1.5, vmax = 5.5, className }: HUDLegendProps)
       <div
         className="h-2 w-32 rounded-[1px] mb-1"
         style={{
+          // Inferno colormap (matches the per-pixel flux PNG and the
+          // per-building rooftop tints). Purple → red → orange → yellow.
           background:
-            "linear-gradient(to right, #1FB6FF 0%, #FFB020 50%, #F040C0 100%)",
+            "linear-gradient(to right, #000004 0%, #420A68 22%, #932667 45%, #DD513A 65%, #F37819 82%, #FCA40D 92%, #FCFFA4 100%)",
         }}
       />
       <div className="flex items-center justify-between text-dim tabular-nums">

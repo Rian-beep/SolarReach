@@ -554,6 +554,12 @@ export function MapSlot({
             const score = lead.scores?.composite_score ?? 0;
             const band = score >= 70 ? "high" : score >= 50 ? "mid" : "low";
             const isSelected = lead._id === selectedLeadId;
+            // Pin label: surface OWNER on the map directly. Score followed
+            // by company_name (truncated to keep the marker compact).
+            const owner = lead.owner?.company_name ?? "—";
+            const ownerShort =
+              owner.length > 22 ? owner.slice(0, 21) + "…" : owner;
+            const labelText = `${score} · ${ownerShort}`;
             return (
               <gmp-marker-3d-interactive-element
                 key={lead._id}
@@ -562,7 +568,7 @@ export function MapSlot({
                   const mk = el as unknown as Record<string, unknown>;
                   mk.position = { lat, lng, altitude: 30 };
                   mk.altitudeMode = "RELATIVE_TO_GROUND";
-                  mk.label = String(score);
+                  mk.label = labelText;
                   el.setAttribute("data-lead-id", lead._id);
                   el.setAttribute("data-score-band", band);
                   el.setAttribute("data-selected", isSelected ? "1" : "0");
@@ -572,18 +578,36 @@ export function MapSlot({
           })}
 
         {/* Per-building radiance overlay — translucent rooftop polygon tinted
-            by composite_score. This is the "solar radiance on top of every
-            building" feel; pixel-accurate flux is in the drawer. */}
+            by composite_score on a TRUE INFERNO gradient (purple → red →
+            orange → yellow). Matches the per-pixel flux PNG colormap so
+            the polygons read as 'how much radiance hits this roof' instead
+            of arbitrary brand colours. */}
         {showPolygons &&
           leads.map((lead) => {
             const ring = lead.rooftop_polygon?.coordinates?.[0];
             if (!ring || ring.length < 3) return null;
             const score = lead.scores?.composite_score ?? 0;
-            // Score → fill / stroke (Gotham-aligned cyan/amber/red, low alpha).
-            const fill =
-              score >= 70 ? "#20D08240" : score >= 50 ? "#FFB02040" : "#FF475740";
-            const stroke =
-              score >= 70 ? "#20D082" : score >= 50 ? "#FFB020" : "#FF4757";
+            // Inferno stops (matplotlib-aligned). Higher score = brighter heat.
+            // Each fill ends in '50' = 80/255 alpha = readable on light + dark
+            // photorealistic surfaces.
+            let fill: string;
+            let stroke: string;
+            if (score >= 80) {
+              fill = "#FCFFA450"; // pale yellow — peak radiance
+              stroke = "#FCA40D";
+            } else if (score >= 65) {
+              fill = "#F37819A0"; // orange
+              stroke = "#F37819";
+            } else if (score >= 50) {
+              fill = "#DD513AA0"; // red-orange
+              stroke = "#DD513A";
+            } else if (score >= 35) {
+              fill = "#932667A0"; // magenta
+              stroke = "#932667";
+            } else {
+              fill = "#420A68A0"; // deep purple — low radiance
+              stroke = "#420A68";
+            }
             // gmp-polygon-3d-element wants an array of {lat, lng, altitude}.
             const outer = ring.map(([cLng, cLat]) => ({
               lat: cLat,
