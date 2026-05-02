@@ -30,6 +30,7 @@ dependencies = [
     "matplotlib>=3.9",
     "pillow>=10.4",
     "numpy>=1.26",
+    "solarreach-swarm",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,7 @@ dev = [
 [tool.uv.sources]
 solarreach-shared = { path = "../shared/py", editable = true }
 codex-brain = { path = "../codex", editable = true }
+solarreach-swarm = { path = "../swarm", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

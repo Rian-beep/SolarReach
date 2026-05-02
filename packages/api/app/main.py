@@ -95,6 +95,21 @@ def create_app() -> FastAPI:
     flux_dir = Path("/tmp/flux")
     flux_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static/flux", StaticFiles(directory=str(flux_dir)), name="flux")
+    # Swarm artifacts (pptx + mp3 produced by CrewAI specialists).
+    swarm_decks = Path("/tmp/swarm-decks")
+    swarm_decks.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/static/swarm/decks",
+        StaticFiles(directory=str(swarm_decks)),
+        name="swarm-decks",
+    )
+    swarm_tts = Path("/tmp/swarm-tts")
+    swarm_tts.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/static/swarm/tts",
+        StaticFiles(directory=str(swarm_tts)),
+        name="swarm-tts",
+    )
     return app
 
 

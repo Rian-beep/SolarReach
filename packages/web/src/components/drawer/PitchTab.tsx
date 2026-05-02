@@ -1,4 +1,12 @@
-import { Download, FileText, Mail, Sparkles } from "lucide-react";
+import { useState } from "react";
+import {
+  Bot,
+  Download,
+  FileText,
+  Mail,
+  Music,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import {
@@ -10,7 +18,12 @@ import {
 } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Badge } from "@/components/ui/Badge";
-import { useGeneratePitch, API_BASE } from "@/lib/api";
+import {
+  API_BASE,
+  useGeneratePitch,
+  useSwarmJob,
+  useSwarmRun,
+} from "@/lib/api";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { gbp } from "@/lib/utils";
 import type { Lead } from "@/lib/types";
@@ -21,13 +34,18 @@ interface PitchTabProps {
 }
 
 const PITCH_COST_CENTS = 10;
+const SWARM_COST_CENTS = 30;
 
 export function PitchTab({
   lead,
   clientId = "client-greensolar-uk",
 }: PitchTabProps) {
   const pitch = useGeneratePitch();
+  const swarmRun = useSwarmRun();
   const { confirm } = useCostConfirm();
+
+  const [swarmJobId, setSwarmJobId] = useState<string | null>(null);
+  const swarmJob = useSwarmJob(swarmJobId);
 
   const onGenerate = async () => {
     const ok = await confirm(
@@ -43,7 +61,30 @@ export function PitchTab({
     }
   };
 
+  const onBuildSwarm = async () => {
+    const ok = await confirm(
+      SWARM_COST_CENTS,
+      "Build outreach package (Opus 4.7 + Haiku 4.5 swarm)",
+    );
+    if (!ok) return;
+    try {
+      const res = await swarmRun.mutateAsync({
+        objective: `Build full outreach package for lead ${lead._id}`,
+        target_lead_id: lead._id,
+      });
+      setSwarmJobId(res.job_id);
+      toast.success(`Swarm dispatched · ${res.job_id.slice(0, 12)}…`);
+    } catch (err) {
+      toast.error(`Swarm failed: ${(err as Error).message}`);
+    }
+  };
+
   const result = pitch.data;
+  const job = swarmJob.data;
+  const swarmRunning =
+    swarmRun.isPending || job?.status === "queued" || job?.status === "running";
+  const swarmDone = job?.status === "done";
+  const swarmError = job?.status === "error";
 
   return (
     <div className="space-y-3">
@@ -59,7 +100,7 @@ export function PitchTab({
             &rarr; PDF.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-1.5">
           <Button
             onClick={onGenerate}
             disabled={pitch.isPending}
@@ -68,6 +109,17 @@ export function PitchTab({
             {pitch.isPending
               ? "GENERATING…"
               : `[GENERATE PITCH] · ${gbp(PITCH_COST_CENTS, { cents: true })}`}
+          </Button>
+          <Button
+            variant="magenta"
+            onClick={onBuildSwarm}
+            disabled={swarmRunning}
+            className="w-full"
+          >
+            <Bot className="size-3.5" strokeWidth={1.5} />
+            {swarmRunning
+              ? `${(job?.status ?? "QUEUED").toUpperCase()}…`
+              : `[BUILD OUTREACH PACKAGE — SWARM] · ~30s · ${gbp(SWARM_COST_CENTS, { cents: true })}`}
           </Button>
         </CardContent>
       </Card>
@@ -82,6 +134,97 @@ export function PitchTab({
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="aspect-video" />
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Swarm progress */}
+      {swarmJobId && (swarmRunning || swarmDone || swarmError) && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-1.5">
+                <Bot className="size-3.5 text-magenta" strokeWidth={1.5} />
+                SWARM ARTIFACTS
+              </CardTitle>
+              <Badge variant={swarmError ? "amber" : "cyan"}>
+                {(job?.status ?? "queued").toUpperCase()}
+              </Badge>
+            </div>
+            <CardDescription className="font-mono text-[10px]">
+              {swarmJobId}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {swarmRunning && (
+              <div className="grid grid-cols-3 gap-1.5">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="aspect-video" />
+                ))}
+              </div>
+            )}
+
+            {swarmError && job?.error && (
+              <p className="text-xs text-amber whitespace-pre-line">
+                {job.error}
+              </p>
+            )}
+
+            {swarmDone && job?.artifacts && (
+              <>
+                <div className="flex gap-2">
+                  {job.artifacts.pptx_url && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      asChild
+                      className="flex-1"
+                    >
+                      <a
+                        href={`${API_BASE}${job.artifacts.pptx_url}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Download className="size-3.5" strokeWidth={1.5} />
+                        [DOWNLOAD PPTX]
+                      </a>
+                    </Button>
+                  )}
+                  {job.artifacts.mp3_url && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      asChild
+                      className="flex-1"
+                    >
+                      <a
+                        href={`${API_BASE}${job.artifacts.mp3_url}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Music className="size-3.5" strokeWidth={1.5} />
+                        [PLAY MP3]
+                      </a>
+                    </Button>
+                  )}
+                </div>
+                {job.artifacts.research_bullets.length > 0 && (
+                  <div className="rounded-[2px] border border-iron bg-app-elev-1 p-2">
+                    <div className="font-mono text-[10px] uppercase tracking-wide text-cyan mb-1">
+                      RESEARCH
+                    </div>
+                    <ul className="space-y-0.5 text-xs text-bone leading-relaxed">
+                      {job.artifacts.research_bullets.map((b, i) => (
+                        <li key={i} className="flex gap-1.5">
+                          <span className="text-dim">·</span>
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       )}

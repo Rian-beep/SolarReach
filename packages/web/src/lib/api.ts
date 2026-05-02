@@ -17,6 +17,8 @@ import type {
   PricingTier,
   ScanResponse,
   Spend,
+  SwarmJob,
+  SwarmRunResponse,
   VoiceSignedUrl,
 } from "./types";
 
@@ -280,5 +282,49 @@ export function useClient(slug: string): UseQueryResult<Client, Error> {
     queryKey: ["client", slug],
     queryFn: () => http<Client>(`/admin/client/${slug}`),
     staleTime: 60_000,
+  });
+}
+
+// ─── Swarm ─────────────────────────────────────────────────────────────────
+
+export interface SwarmRunArgs {
+  objective: string;
+  target_lead_id?: string | null;
+}
+
+export function useSwarmRun(): UseMutationResult<
+  SwarmRunResponse,
+  Error,
+  SwarmRunArgs
+> {
+  return useMutation({
+    mutationFn: (args) =>
+      http<SwarmRunResponse>("/swarm/run", {
+        method: "POST",
+        body: JSON.stringify({
+          objective: args.objective,
+          target_lead_id: args.target_lead_id ?? null,
+        }),
+      }),
+  });
+}
+
+/**
+ * Poll a swarm job. Refetches every 2 s while the job is queued/running.
+ * Pass `null` to disable.
+ */
+export function useSwarmJob(
+  jobId: string | null,
+): UseQueryResult<SwarmJob, Error> {
+  return useQuery({
+    queryKey: ["swarm-job", jobId],
+    queryFn: () => http<SwarmJob>(`/swarm/job/${jobId}`),
+    enabled: !!jobId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "done" || status === "error" ? false : 2_000;
+    },
+    refetchIntervalInBackground: false,
+    staleTime: 0,
   });
 }
