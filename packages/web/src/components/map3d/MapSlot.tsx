@@ -506,45 +506,50 @@ export function MapSlot({
         ref={(el) => {
           mapRef.current = el;
           if (!el) return;
-          // Set initial camera + mode ONCE per element. Re-running this on
-          // every render would stomp every flyTo (search target, lead
-          // selection, user gestures).
+          // Set initial camera + mode ONCE per element, but ONLY after
+          // customElements.whenDefined() resolves — the alpha SDK upgrades
+          // gmp-map-3d via dynamic library import and the ref callback
+          // can fire before that's done. Setting properties pre-upgrade
+          // silently no-ops (the element is the un-upgraded HTMLElement).
           if (initialCameraSetRef.current) return;
-          initialCameraSetRef.current = true;
 
-          // Alpha SDK requires JS-property assignment with structured Object
-          // values for center/range/tilt — the HTML-attribute form throws
-          // `InvalidValueError: Cannot set property "center" ... not an Object`.
-          const m = el as unknown as Record<string, unknown>;
-          m.center = {
-            lat: UK_CENTER.lat,
-            lng: UK_CENTER.lng,
-            altitude: UK_CENTER.alt,
-          };
-          m.range = UK_RANGE;
-          m.tilt = UK_TILT;
-
-          // HYBRID mode renders Photorealistic 3D imagery + roads/labels +
-          // our overlays. SATELLITE mode also hid OUR markers/polygons in
-          // testing — alpha SDK ties overlay render passes to label render
-          // pass. HYBRID with Google's POI clutter is the lesser evil.
-          const g = (window as unknown as {
-            google?: {
-              maps?: { maps3d?: { MapMode?: Record<string, unknown> } };
+          const applyInit = () => {
+            if (initialCameraSetRef.current) return;
+            const m = el as unknown as Record<string, unknown>;
+            m.center = {
+              lat: UK_CENTER.lat,
+              lng: UK_CENTER.lng,
+              altitude: UK_CENTER.alt,
             };
-          }).google;
-          const MapMode = g?.maps?.maps3d?.MapMode;
-          if (MapMode && typeof MapMode.HYBRID !== "undefined") {
-            m.mode = MapMode.HYBRID;
-          } else {
-            for (const candidate of ["HYBRID", "Hybrid", "SATELLITE", "Satellite"]) {
-              try {
-                m.mode = candidate;
-                break;
-              } catch {
-                /* try next */
-              }
+            m.range = UK_RANGE;
+            m.tilt = UK_TILT;
+            // HYBRID = Photorealistic 3D + labels (essential — without this
+            // the SDK falls back to ROADMAP flat vector view).
+            const g = (window as unknown as {
+              google?: {
+                maps?: { maps3d?: { MapMode?: Record<string, unknown> } };
+              };
+            }).google;
+            const MapMode = g?.maps?.maps3d?.MapMode;
+            if (MapMode && typeof MapMode.HYBRID !== "undefined") {
+              m.mode = MapMode.HYBRID;
             }
+            // Verify mode actually took. ROADMAP = the property assignment
+            // happened before customElements.define ran. Retry next tick.
+            if ((m.mode as string) === "ROADMAP" || m.mode == null) {
+              setTimeout(applyInit, 50);
+              return;
+            }
+            initialCameraSetRef.current = true;
+          };
+
+          if (window.customElements?.whenDefined) {
+            window.customElements
+              .whenDefined("gmp-map-3d")
+              .then(applyInit)
+              .catch(() => applyInit());
+          } else {
+            applyInit();
           }
         }}
         style={{ width: "100%", height: "100%" }}
