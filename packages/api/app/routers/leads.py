@@ -141,6 +141,78 @@ class RefreshDirectorsResponse(BaseModel):
     warning: str | None = None
 
 
+# Plausible fallback directors used when Companies House is unreachable / has no
+# data for the company. Persisted to the `directors` collection so downstream
+# /build_org + /pitch can use them without re-hitting CH.
+_FALLBACK_DIRECTOR_TEMPLATES: list[dict[str, str]] = [
+    {"name": "Patel, Sarah", "name_display": "Sarah Patel", "role": "CFO", "appointed_on": "2019-03-12"},
+    {"name": "Hall, Adam", "name_display": "Adam Hall", "role": "MANAGING DIRECTOR", "appointed_on": "2017-06-01"},
+    {"name": "Patel, Rajesh", "name_display": "Rajesh Patel", "role": "DIRECTOR", "appointed_on": "2020-09-08"},
+]
+
+
+async def _seed_fallback_directors(
+    db: AsyncIOMotorDatabase, company_id: str
+) -> list[dict]:
+    """Persist a small set of plausible directors for a company so the demo
+    flow never blocks on CH being down.
+
+    Idempotent + non-destructive: if the company already has directors
+    persisted (from a prior successful CH run or a manual seed), return those
+    untouched rather than overwriting them.
+    """
+    existing_ids = []
+    co = await db.companies.find_one({"_id": company_id}, {"directors": 1})
+    if co:
+        existing_ids = list(co.get("directors") or [])
+    if existing_ids:
+        cursor = db.directors.find({"_id": {"$in": existing_ids}})
+        existing_docs = await cursor.to_list(length=200)
+        if existing_docs:
+            return existing_docs
+
+    docs: list[dict] = []
+    ids: list[str] = []
+    for i, tmpl in enumerate(_FALLBACK_DIRECTOR_TEMPLATES):
+        director_id = f"director_fallback_{company_id[:32]}_{i}"
+        doc = {
+            "_id": director_id,
+            "company_id": company_id,
+            "name": tmpl["name"],
+            "name_display": tmpl["name_display"],
+            "role": tmpl["role"],
+            "appointed_on": tmpl["appointed_on"],
+            "resigned_on": None,
+            "ch_officer_id": None,
+            "occupation": None,
+            "nationality": None,
+            "source": "fallback_seed",
+        }
+        await db.directors.update_one(
+            {"_id": director_id}, {"$set": doc}, upsert=True
+        )
+        docs.append(doc)
+        ids.append(director_id)
+    await db.companies.update_one(
+        {"_id": company_id}, {"$set": {"directors": ids}}
+    )
+    return docs
+
+
+def _public_directors(docs: list[dict]) -> list[dict]:
+    """Slim down internal director docs to the public response shape."""
+    return [
+        {
+            "name_display": d["name_display"],
+            "name": d["name"],
+            "role": d["role"],
+            "appointed_on": d.get("appointed_on"),
+            "resigned_on": d.get("resigned_on"),
+        }
+        for d in docs
+    ]
+
+
 @router.post("/lead/{lead_id}/refresh_directors", response_model=RefreshDirectorsResponse)
 async def refresh_directors(
     lead_id: str,
@@ -150,10 +222,12 @@ async def refresh_directors(
     """Pull officers for a lead's owning company from Companies House and
     upsert them into the `directors` collection. Idempotent.
 
-    Behaviours:
-    - Lead has no company   → 400
-    - Company has no ch_number  → return [] with warning="no_companies_house_link"
-    - CH key not configured  → return [] with warning="no_ch_api_key" (mock fallback for tests)
+    Always returns 200 — never 502 — so the demo never crashes. Behaviours:
+    - Lead has no company        → 400
+    - Lead/company missing       → 404
+    - Company has no ch_number   → search-by-name on CH; if no hit OR no key,
+                                   seed fallback directors (warning set).
+    - CH live call fails (401, 5xx, network) → seed fallback (warning set).
     """
     lead = await db.leads.find_one({"_id": lead_id})
     if not lead:
@@ -167,20 +241,11 @@ async def refresh_directors(
         raise HTTPException(404, "company not found")
 
     ch_number = company.get("ch_number")
+    company_name = company.get("name") or (lead.get("owner") or {}).get("company_name") or ""
 
-    if not ch_number:
-        await log_audit(
-            db,
-            action="lead.refresh_directors",
-            lead_id=lead_id,
-            cost_cents=0,
-            metadata={"provider": "companies_house", "skipped": "no_ch_number"},
-        )
-        return RefreshDirectorsResponse(directors=[], warning="no_companies_house_link")
-
+    # --- Path 1: no CH key configured at all ---
     if not settings.companies_house_api_key:
-        # No key configured → return small stub so frontend renders, but flag it.
-        log.info("# refresh_directors no CH key, returning stub for lead=%s", lead_id)
+        log.info("refresh_directors: no CH key, seeding fallback for lead=%s", lead_id)
         await log_audit(
             db,
             action="lead.refresh_directors",
@@ -188,32 +253,111 @@ async def refresh_directors(
             cost_cents=0,
             metadata={"provider": "companies_house", "skipped": "no_ch_api_key"},
         )
-        stub = {
-            "_id": f"director_{uuid.uuid4()}",
-            "company_id": company_id,
-            "name": "Patel, Sarah",
-            "name_display": "Sarah Patel",
-            "role": "DIRECTOR",
-            "appointed_on": "2018-04-01",
-        }
-        return RefreshDirectorsResponse(directors=[stub], warning="no_ch_api_key")
+        if not ch_number:
+            return RefreshDirectorsResponse(
+                directors=[], warning="no_companies_house_link"
+            )
+        # Have a ch_number but no key — seed fallback so demo flow renders.
+        seeded = await _seed_fallback_directors(db, company_id)
+        return RefreshDirectorsResponse(
+            directors=_public_directors(seeded), warning="no_ch_api_key"
+        )
 
-    # --- Live Companies House path ---
+    # --- Path 2: no ch_number on company → search by name first ---
+    if not ch_number:
+        if company_name.strip():
+            try:
+                async with CompaniesHouseClient(
+                    settings.companies_house_api_key,
+                    db=db,
+                    actor="agent_a7_refresh_directors",
+                ) as ch:
+                    hits = await ch.search_company(company_name, limit=1)
+                if hits:
+                    ch_number = hits[0].ch_number
+                    # Persist so subsequent runs skip search.
+                    await db.companies.update_one(
+                        {"_id": company_id}, {"$set": {"ch_number": ch_number}}
+                    )
+                    log.info(
+                        "refresh_directors: resolved ch_number=%s by name lookup for lead=%s",
+                        ch_number, lead_id,
+                    )
+            except Exception as e:  # noqa: BLE001 — search failure must not crash demo
+                log.warning(
+                    "CH search-by-name failed for company=%s: %s",
+                    company_name, type(e).__name__,
+                )
+
+        if not ch_number:
+            await log_audit(
+                db,
+                action="lead.refresh_directors",
+                lead_id=lead_id,
+                cost_cents=0,
+                metadata={"provider": "companies_house", "skipped": "no_ch_number"},
+            )
+            # Brief asks: no_companies_house_link warning when we can't resolve.
+            # Existing test (test_refresh_directors_no_ch_number_returns_warning)
+            # asserts directors=[] in this case, so don't auto-seed here.
+            return RefreshDirectorsResponse(
+                directors=[], warning="no_companies_house_link"
+            )
+
+    # --- Path 3: live Companies House call ---
     async with CompaniesHouseClient(
         settings.companies_house_api_key, db=db, actor="agent_a7_refresh_directors"
     ) as ch:
         try:
             officers = await ch.get_officers(ch_number, limit=20)
         except Exception as e:  # noqa: BLE001
-            log.warning("CH officers fetch failed for ch=%s: %s", ch_number, type(e).__name__)
+            err_name = type(e).__name__
+            log.warning(
+                "CH officers fetch failed for ch=%s: %s — falling back to seeded directors",
+                ch_number, err_name,
+            )
             await log_audit(
                 db,
                 action="lead.refresh_directors",
                 lead_id=lead_id,
                 cost_cents=0,
-                metadata={"provider": "companies_house", "error": type(e).__name__},
+                metadata={
+                    "provider": "companies_house",
+                    "error": err_name,
+                    "fallback": "seeded_directors",
+                },
             )
-            raise HTTPException(502, "companies house request failed")
+            seeded = await _seed_fallback_directors(db, company_id)
+            warning = (
+                "ch_unauthorised" if isinstance(e, PermissionError) else "ch_unavailable"
+            )
+            return RefreshDirectorsResponse(
+                directors=_public_directors(seeded), warning=warning
+            )
+
+    # CH replied 200 but no officers (dissolved / old / private) → still seed
+    # so the demo flow renders.
+    if not officers:
+        log.info(
+            "refresh_directors: ch returned 0 officers for ch=%s, seeding fallback",
+            ch_number,
+        )
+        await log_audit(
+            db,
+            action="lead.refresh_directors",
+            lead_id=lead_id,
+            cost_cents=0,
+            metadata={
+                "provider": "companies_house",
+                "ch_number": ch_number,
+                "officer_count": 0,
+                "fallback": "seeded_directors",
+            },
+        )
+        seeded = await _seed_fallback_directors(db, company_id)
+        return RefreshDirectorsResponse(
+            directors=_public_directors(seeded), warning="ch_no_officers"
+        )
 
     director_docs: list[dict] = []
     director_ids: list[str] = []
@@ -262,18 +406,8 @@ async def refresh_directors(
             "officer_count": len(officers),
         },
     )
-    # Return slim view (no internal _ids etc., but include name_display/role)
-    public = [
-        {
-            "name_display": d["name_display"],
-            "name": d["name"],
-            "role": d["role"],
-            "appointed_on": d["appointed_on"],
-            "resigned_on": d["resigned_on"],
-        }
-        for d in director_docs
-    ]
-    return RefreshDirectorsResponse(directors=public)
+    # Return slim view (no internal _ids etc., but include name_display/role).
+    return RefreshDirectorsResponse(directors=_public_directors(director_docs))
 
 
 # --- POST /lead/<id>/build_org ---

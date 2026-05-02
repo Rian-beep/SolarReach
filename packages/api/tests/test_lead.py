@@ -142,6 +142,136 @@ async def test_refresh_directors_no_ch_number_returns_warning(client, mock_db):
 
 
 @pytest.mark.asyncio
+async def test_refresh_directors_ch_401_returns_seeded_fallback(
+    client, mock_db, monkeypatch
+):
+    """CH key configured but rejected (stale 401) → return 200 with seeded
+    fallback directors + warning, never 502."""
+    from app import config as cfg
+
+    cfg.get_settings.cache_clear()
+    monkeypatch.setenv("COMPANIES_HOUSE_API_KEY", "stale_key_will_401")
+    cfg.get_settings.cache_clear()
+
+    await mock_db.leads.insert_one(
+        {"_id": "lead_401", "owner": {"company_id": "company_401"}}
+    )
+    await mock_db.companies.insert_one(
+        {"_id": "company_401", "name": "Acme Ltd", "ch_number": "00012345", "directors": []}
+    )
+
+    try:
+        with respx.mock(base_url=CH_BASE_URL) as router:
+            router.get("/company/00012345/officers").mock(
+                return_value=httpx.Response(401, json={"error": "unauthorized"})
+            )
+            r = client.post("/lead/lead_401/refresh_directors")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["warning"] == "ch_unauthorised"
+        assert len(body["directors"]) >= 1
+        assert "name_display" in body["directors"][0]
+        # Fallback directors must be persisted to mongo.
+        co = await mock_db.companies.find_one({"_id": "company_401"})
+        assert len(co["directors"]) >= 1
+    finally:
+        monkeypatch.delenv("COMPANIES_HOUSE_API_KEY", raising=False)
+        cfg.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_refresh_directors_ch_5xx_returns_seeded_fallback(
+    client, mock_db, monkeypatch
+):
+    """CH service down (5xx) → seed fallback, return 200, never crash demo."""
+    from app import config as cfg
+
+    cfg.get_settings.cache_clear()
+    monkeypatch.setenv("COMPANIES_HOUSE_API_KEY", "k")
+    cfg.get_settings.cache_clear()
+
+    await mock_db.leads.insert_one(
+        {"_id": "lead_5xx", "owner": {"company_id": "company_5xx"}}
+    )
+    await mock_db.companies.insert_one(
+        {"_id": "company_5xx", "name": "Acme", "ch_number": "00099999", "directors": []}
+    )
+
+    try:
+        with respx.mock(base_url=CH_BASE_URL) as router:
+            router.get("/company/00099999/officers").mock(
+                return_value=httpx.Response(503, json={"error": "down"})
+            )
+            r = client.post("/lead/lead_5xx/refresh_directors")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["warning"] == "ch_unavailable"
+        assert len(body["directors"]) >= 1
+    finally:
+        monkeypatch.delenv("COMPANIES_HOUSE_API_KEY", raising=False)
+        cfg.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_refresh_directors_search_by_name_when_no_ch_number(
+    client, mock_db, monkeypatch
+):
+    """Company has no ch_number → search-by-name resolves it, then fetches officers."""
+    from app import config as cfg
+
+    cfg.get_settings.cache_clear()
+    monkeypatch.setenv("COMPANIES_HOUSE_API_KEY", "k")
+    cfg.get_settings.cache_clear()
+
+    await mock_db.leads.insert_one(
+        {
+            "_id": "lead_search",
+            "owner": {"company_id": "company_search", "company_name": "Acme Ltd"},
+        }
+    )
+    await mock_db.companies.insert_one(
+        {"_id": "company_search", "name": "Acme Ltd", "ch_number": None, "directors": []}
+    )
+
+    search_payload = {
+        "items": [
+            {"company_number": "00077777", "title": "ACME LTD", "company_status": "active"}
+        ]
+    }
+    officers_payload = {
+        "items": [
+            {
+                "name": "PATEL, Sarah",
+                "officer_role": "director",
+                "appointed_on": "2018-04-01",
+                "links": {"officer": {"appointments": "/officers/abc/appointments"}},
+            }
+        ]
+    }
+
+    try:
+        with respx.mock(base_url=CH_BASE_URL) as router:
+            router.get("/search/companies").mock(
+                return_value=httpx.Response(200, json=search_payload)
+            )
+            router.get("/company/00077777/officers").mock(
+                return_value=httpx.Response(200, json=officers_payload)
+            )
+            r = client.post("/lead/lead_search/refresh_directors")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body.get("warning") is None
+        assert len(body["directors"]) == 1
+        assert body["directors"][0]["name_display"] == "Sarah Patel"
+        # ch_number was persisted on the company doc.
+        co = await mock_db.companies.find_one({"_id": "company_search"})
+        assert co["ch_number"] == "00077777"
+    finally:
+        monkeypatch.delenv("COMPANIES_HOUSE_API_KEY", raising=False)
+        cfg.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_refresh_directors_live_upserts_directors(client, mock_db, monkeypatch):
     # Make the route think a CH key is configured.
     from app import config as cfg
