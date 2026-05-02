@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  AlertTriangle,
   Banknote,
   ExternalLink,
   Leaf,
@@ -321,26 +320,6 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
             </div>
             <div className="mt-1 font-mono text-[11px] text-mute">
               After cap → 18% writing-down allowance on remainder.
-            </div>
-          </div>
-
-          {/* Super Deduction — EXPIRED */}
-          <div className="rounded-[2px] border border-red/30 bg-red/5 p-2.5">
-            <div className="mb-0.5 flex items-center justify-between">
-              <span className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-bone">
-                <AlertTriangle
-                  className="size-3 text-red"
-                  strokeWidth={1.5}
-                />
-                SUPER DEDUCTION (130%)
-              </span>
-              <Badge variant="red">EXPIRED</Badge>
-            </div>
-            <div className={caption}>
-              Ended 2023-04 · context only
-            </div>
-            <div className="mt-1 font-mono text-[11px] text-mute">
-              Some leads still carrying accelerated allowances from the window.
             </div>
           </div>
 
