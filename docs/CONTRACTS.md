@@ -169,6 +169,10 @@ Base URL: `http://localhost:8000` (dev) · port `8000`
 ### `GET /scan/<scan_id>/stream` (SSE)
 Server-sent events streaming `{type: "lead", data: <Lead>}` then `{type: "done"}`.
 
+### `GET /leads`  <!-- A10: bootstrap list used by web on app load -->
+**Query**: `?client_id=...&limit=50`
+**Returns**: array of Lead docs sorted by `scores.composite_score` desc, then `created_at` desc. Used by `useLeads()` in the frontend to populate the map before any scan has been triggered.
+
 ### `GET /lead/<id>`
 **Returns**: full Lead doc (see schema above) with joined company + directors.
 
@@ -212,6 +216,34 @@ Implementation: ElevenLabs `/v1/convai/conversation/get_signed_url` + context in
 
 ### `GET /health`
 **Returns**: `{ "status": "ok", "services": {mongo, redis, anthropic_reachable} }`
+
+<!-- A10: documenting endpoints shipped by A6/A7 that were not in the original §2.
+     These are real-API gateways (Companies House, calculator inbound) — keep the key server-side. -->
+
+### `POST /realapi/companies-house/search`  <!-- A10: shipped by A7 -->
+**Body**: `{ "name": "Old Street Holdings", "limit": 5 }`
+**Returns**: `{ "results": [{ "ch_number": "...", "title": "...", "address_snippet": "..." }, ...] }`
+Implementation: HTTPS Basic auth (key as username) → `https://api.company-information.service.gov.uk/search/companies`. Audit-logged.
+
+### `POST /realapi/companies-house/officers`  <!-- A10: shipped by A7 -->
+**Body**: `{ "ch_number": "12345678" }`
+**Returns**: `{ "officers": [{ "name": "...", "role": "director", "appointed_on": "ISO-8601", "officer_role": "..." }, ...] }`
+Implementation: Companies House `/company/<ch>/officers`. Audit-logged.
+
+### `POST /realapi/companies-house/company`  <!-- A10: shipped by A7 -->
+**Body**: `{ "ch_number": "12345678" }`
+**Returns**: `{ "company": { "ch_number": "...", "name": "...", "registered_office_address": {...}, "raw": {...} } }`
+Implementation: Companies House `/company/<ch>` profile.
+
+### `GET /realapi/ch/company/<ch_number>`  <!-- A10: legacy GET kept for back-compat with frontend -->
+Returns the raw Companies House profile payload.
+
+### `GET /realapi/ch/officers/<ch_number>`  <!-- A10: legacy GET kept for back-compat -->
+Returns raw officers list.
+
+### `POST /inbound/lead`  <!-- A10: shipped by A2 for calculator-mode -->
+**Body**: `{ "address", "postcode", "annual_kwh": >0, "email"?: EmailStr, "premises_type": "residential" }`
+**Returns**: full Lead doc (financial filled-in, scores zeroed pending scan). Email is sha256-hashed in `audit_log`, never persisted plaintext.
 
 ---
 

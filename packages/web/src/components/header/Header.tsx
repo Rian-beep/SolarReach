@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
-import { useScan } from "@/lib/api";
+import { useScan, API_BASE } from "@/lib/api";
 import { formatPostcode } from "@/lib/utils";
+import { useLeadStore } from "@/stores/useLeadStore";
+import type { Lead } from "@/lib/types";
 import { SpendIndicator } from "./SpendIndicator";
 
 export type AppMode = "map" | "calculator" | "admin";
@@ -16,6 +18,7 @@ interface HeaderProps {
 export function Header({ mode, onModeChange, atlasStatus = "live" }: HeaderProps) {
   const [postcode, setPostcode] = useState("");
   const scan = useScan();
+  const addLead = useLeadStore((s) => s.addLead);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -28,6 +31,23 @@ export function Header({ mode, onModeChange, atlasStatus = "live" }: HeaderProps
     try {
       const res = await scan.mutateAsync({ postcode: pretty });
       toast.success(`Scan started — ${res.lead_count} leads incoming`);
+      // Stream incoming leads into the store as the SSE emits them. This
+      // gives the "markers stream in real-time" feel called out in the
+      // demo runbook (Atlas Change Streams behind the SSE).
+      const streamUrl = res.stream_url.startsWith("http")
+        ? res.stream_url
+        : `${API_BASE}${res.stream_url}`;
+      const es = new EventSource(streamUrl, { withCredentials: false });
+      es.addEventListener("lead", (ev) => {
+        try {
+          const lead = JSON.parse((ev as MessageEvent).data) as Lead;
+          addLead(lead);
+        } catch {
+          // ignore malformed event
+        }
+      });
+      es.addEventListener("done", () => es.close());
+      es.addEventListener("error", () => es.close());
     } catch (err) {
       toast.error(`Scan failed: ${(err as Error).message}`);
     }

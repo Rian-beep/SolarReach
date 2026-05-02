@@ -125,6 +125,31 @@ function loadMapsSdk(apiKey: string): Promise<void> {
     });
   }
   window.__sr_maps_loading = true;
+
+  // Hide Google's "Using the alpha channel" dev banner — it's injected at
+  // body level after the SDK loads. We watch for any node containing the
+  // banner text and set display:none on it (and its parent if needed).
+  if (typeof MutationObserver !== "undefined") {
+    const obs = new MutationObserver((muts) => {
+      for (const m of muts) {
+        m.addedNodes.forEach((n) => {
+          if (!(n instanceof HTMLElement)) return;
+          const txt = n.innerText ?? "";
+          if (txt.includes("alpha channel of the Google Maps")) {
+            n.style.display = "none";
+            const parent = n.parentElement;
+            if (parent && parent !== document.body) {
+              parent.style.display = "none";
+            }
+          }
+        });
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    // Auto-disconnect after 30s — banner only appears once per session.
+    setTimeout(() => obs.disconnect(), 30000);
+  }
+
   return new Promise((resolve, reject) => {
     window.__sr_maps_ready = () => resolve();
     const s = document.createElement("script");
@@ -373,8 +398,11 @@ export function MapSlot({
           mapRef.current = el;
           if (!el) return;
           // Alpha SDK requires JS-property assignment with structured Object
-          // values for center/range/tilt/mode — the HTML-attribute form throws
+          // values for center/range/tilt — the HTML-attribute form throws
           // `InvalidValueError: Cannot set property "center" ... not an Object`.
+          // We deliberately DO NOT set `mode` — the alpha enum is volatile
+          // ("hybrid"/"satellite" both rejected on current build); the SDK's
+          // default Photorealistic 3D rendering is what we want anyway.
           const m = el as unknown as Record<string, unknown>;
           m.center = {
             lat: UK_CENTER.lat,
@@ -383,7 +411,6 @@ export function MapSlot({
           };
           m.range = UK_RANGE;
           m.tilt = UK_TILT;
-          m.mode = "hybrid";
         }}
         style={{ width: "100%", height: "100%" }}
       >

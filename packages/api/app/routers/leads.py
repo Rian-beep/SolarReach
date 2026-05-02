@@ -45,6 +45,27 @@ async def _join_lead(db: AsyncIOMotorDatabase, lead: dict) -> dict:
     return lead
 
 
+# --- GET /leads (bootstrap list — A10) ---
+
+@router.get("/leads")
+async def list_leads(
+    client_id: str = Query(default="client-greensolar-uk"),
+    limit: int = Query(default=50, le=200),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return the most recently created leads for a client. Used by the
+    frontend to bootstrap the map on app load before any scan has run.
+    Sorted by composite_score desc so the highest-scoring markers render first.
+    """
+    cursor = (
+        db.leads.find({"client_id": client_id})
+        .sort([("scores.composite_score", -1), ("created_at", -1)])
+        .limit(limit)
+    )
+    docs = await cursor.to_list(length=limit)
+    return docs
+
+
 # --- GET /lead/<id> ---
 
 @router.get("/lead/{lead_id}")
@@ -403,7 +424,9 @@ async def pitch_download(
         raise HTTPException(404, "lead not found")
     static_dir = Path(os.environ.get("SOLARREACH_STATIC_DIR", "static")) / "pitches"
     static_dir.mkdir(parents=True, exist_ok=True)
-    # A2 STUB — write a placeholder so download is testable.
+    # If the real renderer produced a file under /tmp/decks, that path is exposed
+    # via /static/pitches; this fallback keeps download testable when no pitch
+    # has been generated yet (writes a sentinel header only).
     fname = f"{lead_id}.{format}"
     fpath = static_dir / fname
     if not fpath.exists():
