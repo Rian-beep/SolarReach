@@ -433,6 +433,17 @@ export function MapSlot({
     });
   }, [sdkReady, selectedLeadId, leads]);
 
+  // Resolve the flux PNG URL — handler returns "/static/flux/<id>.png"
+  // (relative to API_BASE) so we need the absolute form for an <img src>.
+  const fluxImgUrl = useMemo(() => {
+    if (!fluxOverlay?.url) return null;
+    if (fluxOverlay.url.startsWith("http")) return fluxOverlay.url;
+    const apiBase =
+      ((import.meta as unknown as { env?: Record<string, string> }).env
+        ?.VITE_API_BASE ?? "http://localhost:8000") as string;
+    return `${apiBase}${fluxOverlay.url}`;
+  }, [fluxOverlay?.url]);
+
   // ── Render ────────────────────────────────────────────────────────────
   if (loadErr) {
     return (
@@ -465,6 +476,32 @@ export function MapSlot({
 
   return (
     <div className="absolute inset-0">
+      {/* Live Solar Radiance HUD — appears when a lead is selected and the
+          flux PNG has been auto-fetched. Floats above the 3D scene at the
+          bottom-center, mono caption, inferno-gradient legend, dismissable
+          via the layer toggle. */}
+      {showRadiance && fluxImgUrl && (
+        <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 w-[300px] -translate-x-1/2 select-none rounded-[2px] border border-iron-bright bg-app-surface/90 p-2 backdrop-blur-sm">
+          <div className="mb-1 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest">
+            <span className="flex items-center gap-1.5 text-cyan">
+              <span className="size-1.5 rounded-full bg-cyan animate-live-dot" />
+              LIVE · GOOGLE SOLAR API
+            </span>
+            <span className="text-grid">RADIANCE</span>
+          </div>
+          <img
+            src={fluxImgUrl}
+            alt="Solar radiance"
+            className="block h-32 w-full rounded-[2px] border border-iron object-cover"
+          />
+          <div className="mt-1 flex justify-between font-mono text-[10px] uppercase tracking-widest text-mute">
+            <span>{(fluxOverlay?.vmin ?? 0).toFixed(0)} kWh/m²/yr</span>
+            <span className="text-grid">annualFluxUrl</span>
+            <span>{(fluxOverlay?.vmax ?? 0).toFixed(0)}</span>
+          </div>
+        </div>
+      )}
+
       <gmp-map-3d
         ref={(el) => {
           mapRef.current = el;
