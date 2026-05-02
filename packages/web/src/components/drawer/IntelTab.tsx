@@ -235,11 +235,13 @@ export function IntelTab({ lead }: IntelTabProps) {
                 ch_number?: string | null;
               };
             }).company;
-            const ownerSrc = lead.owner.source ?? "synthesized";
+            const ownerSrc: string = lead.owner.source ?? "synthesized";
             const isUK =
-              ownerSrc === "ccod" ||
-              ownerSrc === "real_owners_whitelist" ||
-              company?.country_of_incorporation === "United Kingdom";
+              ownerSrc !== "ocod" &&
+              (ownerSrc === "ccod" ||
+                ownerSrc === "real_owners_whitelist" ||
+                ownerSrc === "synthesized" ||
+                company?.country_of_incorporation === "United Kingdom");
             const country =
               company?.country_of_incorporation ??
               (isUK ? "United Kingdom" : "Overseas");
