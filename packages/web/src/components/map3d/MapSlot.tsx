@@ -524,17 +524,20 @@ export function MapSlot({
           m.range = UK_RANGE;
           m.tilt = UK_TILT;
 
-          // HYBRID mode → Photorealistic 3D imagery + road/label overlay.
+          // SATELLITE mode → Photorealistic 3D imagery, no road/POI labels.
+          // HYBRID adds road labels + Google's own POI pins (CodeNode,
+          // Halifax, M&S etc.) which clutter our pin layer. SATELLITE is
+          // the cleanest base for an overlay-heavy cockpit.
           const g = (window as unknown as {
             google?: {
               maps?: { maps3d?: { MapMode?: Record<string, unknown> } };
             };
           }).google;
           const MapMode = g?.maps?.maps3d?.MapMode;
-          if (MapMode && typeof MapMode.HYBRID !== "undefined") {
-            m.mode = MapMode.HYBRID;
+          if (MapMode && typeof MapMode.SATELLITE !== "undefined") {
+            m.mode = MapMode.SATELLITE;
           } else {
-            for (const candidate of ["HYBRID", "Hybrid", "SATELLITE", "Satellite"]) {
+            for (const candidate of ["SATELLITE", "Satellite", "HYBRID", "Hybrid"]) {
               try {
                 m.mode = candidate;
                 break;
@@ -554,8 +557,6 @@ export function MapSlot({
             const score = lead.scores?.composite_score ?? 0;
             const band = score >= 70 ? "high" : score >= 50 ? "mid" : "low";
             const isSelected = lead._id === selectedLeadId;
-            // Pin label: surface OWNER on the map directly. Score followed
-            // by company_name (truncated to keep the marker compact).
             const owner = lead.owner?.company_name ?? "—";
             const ownerShort =
               owner.length > 22 ? owner.slice(0, 21) + "…" : owner;
@@ -566,8 +567,12 @@ export function MapSlot({
                 ref={(el) => {
                   if (!el) return;
                   const mk = el as unknown as Record<string, unknown>;
-                  mk.position = { lat, lng, altitude: 30 };
+                  // Altitude 120m so the pin floats clearly ABOVE London
+                  // buildings (most are 30-100m tall). RELATIVE_TO_GROUND
+                  // means it tracks terrain.
+                  mk.position = { lat, lng, altitude: 120 };
                   mk.altitudeMode = "RELATIVE_TO_GROUND";
+                  mk.extruded = true; // draws a vertical pin stem
                   mk.label = labelText;
                   el.setAttribute("data-lead-id", lead._id);
                   el.setAttribute("data-score-band", band);
@@ -619,17 +624,26 @@ export function MapSlot({
               lng: cLng,
               altitude: 6,
             }));
+            // Altitude 90m → above most London building roofs (commercial
+            // buildings around the City of London peak around 60-80m).
+            // RELATIVE_TO_GROUND tracks terrain. Without this the polygon
+            // sits at 6m which is INSIDE the building geometry → invisible.
+            const outerHigh = ring.map(([cLng, cLat]) => ({
+              lat: cLat,
+              lng: cLng,
+              altitude: 90,
+            }));
             return (
               <gmp-polygon-3d-element
                 key={`bldg-${lead._id}`}
                 ref={(el) => {
                   if (!el) return;
                   const p = el as unknown as Record<string, unknown>;
-                  p.outerCoordinates = outer;
+                  p.outerCoordinates = outerHigh;
                   p.altitudeMode = "RELATIVE_TO_GROUND";
                   p.fillColor = fill;
                   p.strokeColor = stroke;
-                  p.strokeWidth = 1;
+                  p.strokeWidth = 2;
                   p.extruded = false;
                   el.setAttribute("data-lead-id", lead._id);
                 }}
@@ -639,16 +653,16 @@ export function MapSlot({
 
         {/* Per-panel cyan polygons — only when PANELS layer toggled on AND
             the selected lead has a clipped panel layout from Solar API.
-            Altitude 14m so they float clearly ABOVE the radiance polygon
-            (which sits at 6m). Panel fill is solid-cyan (D0 alpha) so they
-            read as engineered hardware on top of the heat overlay. */}
+            Altitude 95m → 5m above the radiance polygon (90m) so panels
+            visibly stack on top of the heat overlay. Panel fill solid-cyan
+            so they read as engineered hardware. */}
         {showPanels &&
           panelLayout?.panels?.map((p, i) => {
             if (!p.corners || p.corners.length < 3) return null;
             const outer = p.corners.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
-              altitude: 14,
+              altitude: 95,
             }));
             return (
               <gmp-polygon-3d-element

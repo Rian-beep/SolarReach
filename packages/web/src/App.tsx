@@ -27,7 +27,7 @@ import type { Lead } from "@/lib/types";
 
 const DEFAULT_LAYERS: LayerState = {
   pins: true,
-  radiance: false,
+  radiance: true, // heat overlay on by default — read across the whole map
   panels: false,
   polygons: true,
 };
