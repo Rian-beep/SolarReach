@@ -467,9 +467,6 @@ export function MapSlot({
           // Alpha SDK requires JS-property assignment with structured Object
           // values for center/range/tilt — the HTML-attribute form throws
           // `InvalidValueError: Cannot set property "center" ... not an Object`.
-          // We deliberately DO NOT set `mode` — the alpha enum is volatile
-          // ("hybrid"/"satellite" both rejected on current build); the SDK's
-          // default Photorealistic 3D rendering is what we want anyway.
           const m = el as unknown as Record<string, unknown>;
           m.center = {
             lat: UK_CENTER.lat,
@@ -478,6 +475,30 @@ export function MapSlot({
           };
           m.range = UK_RANGE;
           m.tilt = UK_TILT;
+          // Switch to HYBRID — Photorealistic 3D imagery + road/label overlay.
+          // Without this the SDK falls back to the stylized vector map.
+          // Try the MapMode enum first (correct path); fall back to the string
+          // form across SDK builds (case-sensitive on some, insensitive on
+          // others — try uppercase, then capitalised).
+          const g = (window as unknown as {
+            google?: {
+              maps?: { maps3d?: { MapMode?: Record<string, unknown> } };
+            };
+          }).google;
+          const MapMode = g?.maps?.maps3d?.MapMode;
+          if (MapMode && typeof MapMode.HYBRID !== "undefined") {
+            m.mode = MapMode.HYBRID;
+          } else {
+            // Try string variants tolerated by older alpha builds
+            for (const candidate of ["HYBRID", "Hybrid", "SATELLITE", "Satellite"]) {
+              try {
+                m.mode = candidate;
+                break;
+              } catch {
+                /* try next */
+              }
+            }
+          }
         }}
         style={{ width: "100%", height: "100%" }}
       >
