@@ -236,6 +236,11 @@ export function MapSlot({
   // Track previous leads.length so we know when leads JUST populated.
   const prevLeadsLenRef = useRef(0);
 
+  // Latch initial camera set so the ref callback doesn't keep resetting
+  // center/range/tilt on every render (which would stomp the search-fly,
+  // lead-fly, and user gesture moves).
+  const initialCameraSetRef = useRef(false);
+
   // Camera store mutator (HUDs subscribe directly).
   const setCamera = useCameraStore((s) => s.set);
 
@@ -464,6 +469,12 @@ export function MapSlot({
         ref={(el) => {
           mapRef.current = el;
           if (!el) return;
+          // Set initial camera + mode ONCE per element. Re-running this on
+          // every render would stomp every flyTo (search target, lead
+          // selection, user gestures).
+          if (initialCameraSetRef.current) return;
+          initialCameraSetRef.current = true;
+
           // Alpha SDK requires JS-property assignment with structured Object
           // values for center/range/tilt — the HTML-attribute form throws
           // `InvalidValueError: Cannot set property "center" ... not an Object`.
@@ -475,11 +486,8 @@ export function MapSlot({
           };
           m.range = UK_RANGE;
           m.tilt = UK_TILT;
-          // Switch to HYBRID — Photorealistic 3D imagery + road/label overlay.
-          // Without this the SDK falls back to the stylized vector map.
-          // Try the MapMode enum first (correct path); fall back to the string
-          // form across SDK builds (case-sensitive on some, insensitive on
-          // others — try uppercase, then capitalised).
+
+          // HYBRID mode → Photorealistic 3D imagery + road/label overlay.
           const g = (window as unknown as {
             google?: {
               maps?: { maps3d?: { MapMode?: Record<string, unknown> } };
@@ -489,7 +497,6 @@ export function MapSlot({
           if (MapMode && typeof MapMode.HYBRID !== "undefined") {
             m.mode = MapMode.HYBRID;
           } else {
-            // Try string variants tolerated by older alpha builds
             for (const candidate of ["HYBRID", "Hybrid", "SATELLITE", "Satellite"]) {
               try {
                 m.mode = candidate;
