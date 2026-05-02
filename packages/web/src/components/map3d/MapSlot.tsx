@@ -369,11 +369,22 @@ export function MapSlot({
   return (
     <div className="absolute inset-0">
       <gmp-map-3d
-        ref={mapRef as React.RefObject<HTMLElement>}
-        center={`${UK_CENTER.lat}, ${UK_CENTER.lng}, ${UK_CENTER.alt}`}
-        range={String(UK_RANGE)}
-        tilt={String(UK_TILT)}
-        mode="hybrid"
+        ref={(el) => {
+          mapRef.current = el;
+          if (!el) return;
+          // Alpha SDK requires JS-property assignment with structured Object
+          // values for center/range/tilt/mode — the HTML-attribute form throws
+          // `InvalidValueError: Cannot set property "center" ... not an Object`.
+          const m = el as unknown as Record<string, unknown>;
+          m.center = {
+            lat: UK_CENTER.lat,
+            lng: UK_CENTER.lng,
+            altitude: UK_CENTER.alt,
+          };
+          m.range = UK_RANGE;
+          m.tilt = UK_TILT;
+          m.mode = "hybrid";
+        }}
         style={{ width: "100%", height: "100%" }}
       >
         {showPins &&
@@ -387,52 +398,20 @@ export function MapSlot({
             return (
               <gmp-marker-3d-interactive-element
                 key={lead._id}
-                data-lead-id={lead._id}
-                position={`${lat}, ${lng}, 30`}
-                altitude-mode="RELATIVE_TO_GROUND"
-                label={String(score)}
-                data-score-band={band}
-                data-selected={isSelected ? "1" : "0"}
+                ref={(el) => {
+                  if (!el) return;
+                  // Same imperative property setter for markers.
+                  const mk = el as unknown as Record<string, unknown>;
+                  mk.position = { lat, lng, altitude: 30 };
+                  mk.altitudeMode = "RELATIVE_TO_GROUND";
+                  mk.label = String(score);
+                  el.setAttribute("data-lead-id", lead._id);
+                  el.setAttribute("data-score-band", band);
+                  el.setAttribute("data-selected", isSelected ? "1" : "0");
+                }}
               />
             );
           })}
-
-        {showRadiance && fluxOverlay?.bbox && (
-          <gmp-polygon-3d-element
-            altitude-mode="RELATIVE_TO_GROUND"
-            fill-color="#FFB02055"
-            stroke-color="#FFB020"
-            stroke-width="1"
-          />
-        )}
-
-        {showPanels &&
-          panelLayout?.panels?.map((p, i) => {
-            if (!p.corners || p.corners.length < 3) return null;
-            return (
-              <gmp-polygon-3d-element
-                key={`panel-${i}`}
-                altitude-mode="RELATIVE_TO_GROUND"
-                fill-color="#1FB6FF66"
-                stroke-color="#1FB6FF"
-                stroke-width="1"
-              />
-            );
-          })}
-
-        {showPolygons &&
-          (() => {
-            const sel = leads.find((l) => l._id === selectedLeadId);
-            if (!sel?.rooftop_polygon?.coordinates?.[0]) return null;
-            return (
-              <gmp-polygon-3d-element
-                altitude-mode="RELATIVE_TO_GROUND"
-                fill-color="#20D08233"
-                stroke-color="#20D082"
-                stroke-width="1"
-              />
-            );
-          })()}
       </gmp-map-3d>
     </div>
   );
