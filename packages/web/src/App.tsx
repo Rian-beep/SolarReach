@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header, type AppMode } from "@/components/header/Header";
 import { MapSlot } from "@/components/map3d/MapSlot";
+import { RadianceCanvas } from "@/components/map3d/RadianceCanvas";
 import { HUDCoords } from "@/components/map3d/HUD-Coords";
 import { HUDScale } from "@/components/map3d/HUD-Scale";
 import { HUDLegend } from "@/components/map3d/HUD-Legend";
@@ -194,6 +195,14 @@ export function App() {
                   />
                 </ErrorBoundary>
               </div>
+
+              {/* Global RADIANCE heatmap — inferno blobs at every lead's
+                  geo location, camera-coupled. Sits above the 3D scene
+                  (z-10) but below the HUD overlays (z-20+). Toggled by
+                  the RADIANCE layer chip. */}
+              <ErrorBoundary scope="radiance-canvas">
+                <RadianceCanvas enabled={layers.radiance} />
+              </ErrorBoundary>
 
               {/* HUD overlays — absolute-positioned within map container */}
               <ErrorBoundary scope="hud">

@@ -39,7 +39,7 @@ const LAYERS: LayerDef[] = [
   {
     key: "radiance",
     label: "RADIANCE",
-    hint: "Solar API flux PNG HUD",
+    hint: "city-wide solar heatmap + flux PNG HUD",
     needsLead: true,
   },
   {
