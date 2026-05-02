@@ -224,6 +224,47 @@ export function IntelTab({ lead }: IntelTabProps) {
           <div className="font-mono text-sm text-bone">
             {lead.owner.company_name}
           </div>
+          {/* Registration status — UK (CCOD) vs Overseas (OCOD). Pulled from
+              the joined company doc. Matters for the deal: overseas owners
+              involve cross-border payment + ESG-flag handling. */}
+          {(() => {
+            const company = (lead as unknown as {
+              company?: {
+                country_of_incorporation?: string;
+                source?: string;
+                ch_number?: string | null;
+              };
+            }).company;
+            const ownerSrc = lead.owner.source ?? "synthesized";
+            const isUK =
+              ownerSrc === "ccod" ||
+              ownerSrc === "real_owners_whitelist" ||
+              company?.country_of_incorporation === "United Kingdom";
+            const country =
+              company?.country_of_incorporation ??
+              (isUK ? "United Kingdom" : "Overseas");
+            return (
+              <div className="mt-2 flex items-center gap-2 rounded-[2px] border border-iron px-2 py-1.5">
+                <span
+                  className={
+                    "inline-flex size-1.5 rounded-full " +
+                    (isUK ? "bg-emerald" : "bg-amber")
+                  }
+                />
+                <div className="flex-1 font-mono text-[11px]">
+                  <span className="text-grid uppercase tracking-widest">
+                    REGISTERED IN
+                  </span>{" "}
+                  <span className={isUK ? "text-emerald" : "text-amber"}>
+                    {country}
+                  </span>
+                </div>
+                <span className="font-mono text-[10px] uppercase tracking-widest text-grid">
+                  {isUK ? "CCOD" : "OCOD"}
+                </span>
+              </div>
+            );
+          })()}
           <div className="flex flex-col gap-px font-mono text-xs text-dim">
             <div>
               <span className="text-grid">company_id </span>
