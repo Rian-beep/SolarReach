@@ -32,9 +32,11 @@ def test_async_tasks_marked_async():
     from swarm.crew import build_crew
 
     crew = build_crew(objective="ping", target_lead_id="lead_xyz")
-    # First task is the manager's umbrella task (sync); the other three are async.
+    # ground + plan are sync; the terminal execute task is async.
+    assert len(crew.tasks) == 3
     assert crew.tasks[0].async_execution is False
-    assert all(t.async_execution for t in crew.tasks[1:])
+    assert crew.tasks[1].async_execution is False
+    assert crew.tasks[2].async_execution is True
 
 
 def test_pitch_builder_has_pptx_and_atlas_tools():
@@ -57,7 +59,8 @@ def test_atlas_vector_search_returns_dict_when_mongo_unset(monkeypatch):
 
     from swarm.tools.atlas import atlas_vector_search
 
-    result = atlas_vector_search.invoke({"query": "solar farm", "collection": "companies", "k": 3})
+    # CrewAI tool: call .run() with the args dict.
+    result = atlas_vector_search.run(query="solar farm", collection="companies", k=3)
     assert isinstance(result, dict)
     assert result["ok"] is False
     assert result["data"] == []

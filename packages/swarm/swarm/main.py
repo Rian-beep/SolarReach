@@ -21,16 +21,31 @@ def _project_root() -> Path:
 
 
 def _load_dotenv() -> None:
+    """Load `.env.local` (or `.env`) without leaking secrets into logs.
+
+    `override=False` would skip vars that the parent shell has set to "" — we
+    want those filled. Strategy: read with `dotenv_values`, then `setdefault`
+    each entry so genuine real-shell exports still win.
+    """
     try:
-        from dotenv import load_dotenv
+        from dotenv import dotenv_values
     except Exception:  # noqa: BLE001
         log.info("python-dotenv not installed — skipping .env.local load")
         return
     root = _project_root()
     for candidate in (root / ".env.local", root / ".env"):
-        if candidate.exists():
-            load_dotenv(candidate, override=False)
-            log.info("loaded env from %s", candidate.name)
+        if not candidate.exists():
+            continue
+        vals = dotenv_values(candidate)
+        filled = 0
+        for k, v in vals.items():
+            if v is None:
+                continue
+            current = os.environ.get(k, "")
+            if not current:  # unset OR empty → take .env value
+                os.environ[k] = v
+                filled += 1
+        log.info("loaded %s vars from %s", filled, candidate.name)
 
 
 def run(objective: str, target_lead_id: str | None) -> str:

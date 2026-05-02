@@ -18,7 +18,7 @@ import logging
 import os
 from typing import Any
 
-from langchain_core.tools import tool
+from crewai.tools import tool
 
 from swarm.audit import get_actor_name, write_audit_sync
 from swarm.mongo import get_sync_db

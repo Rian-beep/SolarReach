@@ -38,54 +38,54 @@ def build_crew(objective: str, target_lead_id: str | None = None) -> Crew:
         f" Target lead id: {target_lead_id}." if target_lead_id else ""
     )
 
-    primary_task = Task(
+    # In hierarchical mode the manager owns delegation. Specialist async
+    # fan-out happens inside the manager's reasoning loop (it picks the right
+    # coworker for each sub-step) — CrewAI rejects multiple consecutive async
+    # tasks at the top level, so we declare context-gathering tasks (sync) and
+    # one terminal async aggregation step.
+
+    ground_task = Task(
+        description=(
+            "Ground the swarm in Atlas data. Run atlas_vector_search and/or "
+            "atlas_query for any leads/companies relevant to the objective. "
+            "Return the raw context for downstream specialists."
+        ),
+        expected_output="Markdown summary of the grounding context (5-15 bullets).",
+        agent=outreach_editor,
+    )
+
+    plan_task = Task(
         description=(
             f"Objective: {objective}.{lead_clause}\n\n"
-            "1. Ground yourself in Atlas data via atlas_vector_search before "
-            "delegating.\n"
-            "2. Decompose into sub-tasks and delegate to the right specialist.\n"
-            "3. Aggregate results into a single summary."
+            "Using the grounding context, decompose the objective into "
+            "specialist sub-steps. For each sub-step name the specialist "
+            "(GoogleEngineer / PitchDeckBuilder / OutreachEditor / "
+            "ElevenLabsTTSAgent) and the expected artifact."
+        ),
+        expected_output="Numbered plan with one specialist per step.",
+        agent=manager,
+        context=[ground_task],
+    )
+
+    execute_task = Task(
+        description=(
+            "Execute the plan. Delegate each sub-step to the named specialist "
+            "and aggregate their outputs. Pitch generation, outreach edits, "
+            "and TTS all run via specialist tool calls — every paid call is "
+            "audit-logged automatically."
         ),
         expected_output=(
-            "A markdown summary covering: (a) what each specialist did, "
-            "(b) any artifact paths produced, (c) follow-ups."
+            "Markdown summary covering (a) specialist actions, (b) artifact "
+            "paths produced, (c) follow-ups."
         ),
         agent=manager,
-    )
-
-    pitch_task = Task(
-        description=(
-            "If the objective requires a pitch deck, generate one for the "
-            "target lead using Atlas context + build_pptx. Otherwise skip."
-        ),
-        expected_output="Deck path or 'skipped'.",
-        agent=pitch_builder,
-        async_execution=True,
-    )
-
-    outreach_task = Task(
-        description=(
-            "Read the target lead (and any related companies/directors) from "
-            "Atlas and produce a one-line outreach summary."
-        ),
-        expected_output="One-line outreach summary.",
-        agent=outreach_editor,
-        async_execution=True,
-    )
-
-    tts_task = Task(
-        description=(
-            "If text-to-speech is requested, render an mp3 using elevenlabs_tts. "
-            "Otherwise skip."
-        ),
-        expected_output="MP3 path or 'skipped'.",
-        agent=tts_agent,
+        context=[plan_task],
         async_execution=True,
     )
 
     return Crew(
         agents=specialists,
-        tasks=[primary_task, pitch_task, outreach_task, tts_task],
+        tasks=[ground_task, plan_task, execute_task],
         process=Process.hierarchical,
         manager_llm=manager_llm(),
         verbose=False,

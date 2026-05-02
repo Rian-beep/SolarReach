@@ -283,9 +283,21 @@ gmp-marker-3d-interactive-element[data-score-band="high"] {
   --sr-marker-color: #20d082;
 }
 gmp-marker-3d-interactive-element[data-selected="1"] {
+  /* Override the score-band tint with cyan so the selected pin reads
+     unambiguously above bone/amber/emerald neighbours. */
+  --sr-marker-color: #1fb6ff;
+  color: #1fb6ff;
   transform: scale(1.35);
   filter: drop-shadow(0 0 6px var(--sr-marker-color));
   z-index: 10;
+}
+/* If a future SDK build exposes ::part hooks, the label inside the
+   marker's shadow DOM will pick up cyan instead of bone — defensive
+   and harmless on current builds where ::part(label) doesn't exist. */
+gmp-marker-3d-interactive-element[data-selected="1"]::part(label),
+gmp-marker-3d-interactive-element[data-selected="1"]::part(pin) {
+  color: #1fb6ff;
+  fill: #1fb6ff;
 }
 gmp-marker-3d-interactive-element[data-selected="0"]:hover {
   transform: scale(1.1);

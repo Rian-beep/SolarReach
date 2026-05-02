@@ -14,8 +14,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from crewai import Agent
-from langchain_anthropic import ChatAnthropic
+from crewai import LLM, Agent
 
 from . import MANAGER_MODEL, WORKER_MODEL
 from .tools import (
@@ -28,27 +27,30 @@ from .tools import (
 
 
 # ---------- LLM factories ---------- #
+# CrewAI's LLM wraps litellm. Anthropic models route via the "anthropic/"
+# provider prefix; we pass api_key explicitly so an unset env doesn't crash
+# import-time.
 
 @lru_cache(maxsize=1)
-def manager_llm() -> ChatAnthropic:
-    """Opus 4.7 — strategic planning + delegation. Cached system prompt added
-    by CrewAI; we keep temp moderate to leave room for the delegation
-    reasoning to vary."""
-    return ChatAnthropic(
-        model=MANAGER_MODEL,
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        temperature=0.4,
+def manager_llm() -> LLM:
+    """Opus 4.7 — strategic planning + delegation.
+
+    Note: Opus 4.7 deprecated the `temperature` parameter; passing it returns a
+    400 from the Anthropic API. Haiku 4.5 also deprecated it. We omit it here.
+    """
+    return LLM(
+        model=f"anthropic/{MANAGER_MODEL}",
+        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         max_tokens=4096,
     )
 
 
 @lru_cache(maxsize=1)
-def worker_llm() -> ChatAnthropic:
+def worker_llm() -> LLM:
     """Haiku 4.5 — fast, cheap, parallelisable."""
-    return ChatAnthropic(
-        model=WORKER_MODEL,
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        temperature=0.5,
+    return LLM(
+        model=f"anthropic/{WORKER_MODEL}",
+        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         max_tokens=4096,
     )
 
