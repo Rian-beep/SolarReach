@@ -1,22 +1,28 @@
 {
-  "name": "solarreach",
-  "private": true,
+  "name": "@solarreach/web",
   "version": "0.1.0",
-  "description": "Operations cockpit for the UK commercial solar industry — MongoDB Agentic Evolution Hackathon submission.",
-  "license": "MIT",
-  "packageManager": "pnpm@9.12.0",
-  "engines": {
-    "node": ">=20",
-    "pnpm": ">=9"
-  },
+  "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "biome check packages",
-    "format": "biome format --write packages"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "biome check src"
+  },
+  "dependencies": {
+    "@elevenlabs/client": "^0.1.9",
+    "react": "^19",
+    "react-dom": "^19",
+    "zustand": "^5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4"
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "autoprefixer": "^10",
+    "postcss": "^8",
+    "tailwindcss": "^4",
+    "typescript": "^5.6",
+    "vite": "^5"
   }
 }
