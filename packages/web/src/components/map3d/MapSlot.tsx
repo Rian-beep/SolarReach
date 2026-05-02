@@ -692,19 +692,14 @@ export function MapSlot({
               stroke = "#420A68";
             }
             // gmp-polygon-3d wants an array of {lat, lng, altitude}.
+            // RELATIVE_TO_MESH: altitude is offset from the underlying 3D
+            // mesh surface (i.e. directly on building rooftops). Altitude 2
+            // sits just barely above the mesh so the tint paints on the
+            // actual roof without z-fighting.
             const outer = ring.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
-              altitude: 6,
-            }));
-            // Altitude 50m: most central-London commercial roofs sit
-            // 30-50m above ground. Above that, polygons float disconnected
-            // in the sky. Below 30m they're hidden inside the building
-            // geometry. 50 is the sweet spot for visible-on-most-roofs.
-            const outerHigh = ring.map(([cLng, cLat]) => ({
-              lat: cLat,
-              lng: cLng,
-              altitude: 50,
+              altitude: 2,
             }));
             return (
               <gmp-polygon-3d
@@ -712,8 +707,21 @@ export function MapSlot({
                 ref={(el) => {
                   if (!el) return;
                   const p = el as unknown as Record<string, unknown>;
-                  p.outerCoordinates = outerHigh;
-                  p.altitudeMode = "RELATIVE_TO_GROUND";
+                  p.outerCoordinates = outer;
+                  // Prefer RELATIVE_TO_MESH when the alpha SDK exposes it
+                  // (clamps to building mesh). Fall back to CLAMP_TO_MESH
+                  // then RELATIVE_TO_GROUND for older SDK builds.
+                  const AltMode = (window as unknown as {
+                    google?: {
+                      maps?: { maps3d?: { AltitudeMode?: Record<string, unknown> } };
+                    };
+                  }).google?.maps?.maps3d?.AltitudeMode;
+                  p.altitudeMode =
+                    AltMode && typeof AltMode.RELATIVE_TO_MESH !== "undefined"
+                      ? "RELATIVE_TO_MESH"
+                      : AltMode && typeof AltMode.CLAMP_TO_MESH !== "undefined"
+                        ? "CLAMP_TO_MESH"
+                        : "RELATIVE_TO_GROUND";
                   p.fillColor = fill;
                   p.strokeColor = stroke;
                   p.strokeWidth = 2;
@@ -726,16 +734,17 @@ export function MapSlot({
 
         {/* Per-panel cyan polygons — only when PANELS layer toggled on AND
             the selected lead has a clipped panel layout from Solar API.
-            Altitude 95m → 5m above the radiance polygon (90m) so panels
-            visibly stack on top of the heat overlay. Panel fill solid-cyan
-            so they read as engineered hardware. */}
+            RELATIVE_TO_MESH altitude 5: stacks 5m above the rooftop mesh
+            so panels visibly sit on top of the radiance tint (which sits
+            at +2m above the mesh). Panel fill solid-cyan so they read as
+            engineered hardware. */}
         {showPanels &&
           panelLayout?.panels?.map((p, i) => {
             if (!p.corners || p.corners.length < 3) return null;
             const outer = p.corners.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
-              altitude: 55, // 5m above the radiance polygon (50m)
+              altitude: 5, // 3m above the radiance polygon (+2m), on rooftop mesh
             }));
             return (
               <gmp-polygon-3d
@@ -744,7 +753,17 @@ export function MapSlot({
                   if (!el) return;
                   const pp = el as unknown as Record<string, unknown>;
                   pp.outerCoordinates = outer;
-                  pp.altitudeMode = "RELATIVE_TO_GROUND";
+                  const AltMode = (window as unknown as {
+                    google?: {
+                      maps?: { maps3d?: { AltitudeMode?: Record<string, unknown> } };
+                    };
+                  }).google?.maps?.maps3d?.AltitudeMode;
+                  pp.altitudeMode =
+                    AltMode && typeof AltMode.RELATIVE_TO_MESH !== "undefined"
+                      ? "RELATIVE_TO_MESH"
+                      : AltMode && typeof AltMode.CLAMP_TO_MESH !== "undefined"
+                        ? "CLAMP_TO_MESH"
+                        : "RELATIVE_TO_GROUND";
                   pp.fillColor = "#1FB6FFD0"; // cyan, ~80% opaque
                   pp.strokeColor = "#0891B2"; // deeper cyan stroke
                   pp.strokeWidth = 1;
