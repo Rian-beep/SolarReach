@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-05-02T15:26:43.319753+00:00",
+  "source_db": "solarreach",
+  "files": {
+    "leads.jsonl": 565,
+    "companies.jsonl": 83,
+    "directors.jsonl": 18,
+    "industry_benchmarks.json": 18,
+    "audit_summary.json": 294
+  },
+  "schema_doc": "docs/CONTRACTS.md § 1"
+}

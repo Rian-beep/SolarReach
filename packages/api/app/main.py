@@ -21,6 +21,7 @@ from app.routers import admin as admin_router
 from app.routers import financial as financial_router
 from app.routers import flux as flux_router
 from app.routers import inbound as inbound_router
+from app.routers import integration as integration_router
 from app.routers import leads as leads_router
 from app.routers import panels as panels_router
 from app.routers import realapi as realapi_router
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router.router, tags=["admin"])
     app.include_router(financial_router.router, tags=["financial"])
     app.include_router(inbound_router.router, tags=["inbound"])
+    app.include_router(integration_router.router, tags=["integration"])
     app.include_router(realapi_router.router, tags=["realapi"])
     app.include_router(swarm_router.router, tags=["swarm"])
     # Static (generated decks/pdfs)

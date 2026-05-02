@@ -1,0 +1,83 @@
+# SolarReach API — production image.
+# Multi-stage: build wheels in a fat image, copy into a slim runtime.
+# Build context MUST be the repo root (we need sibling packages: shared/py,
+# codex, swarm) — see infra/docker-compose.yml in dev for the flat layout
+# and .github/workflows/deploy.yml for `context: .`.
+#
+# Resulting runtime image is ~250 MB vs ~700 MB for the dev image (no
+# build-essential, no uv, no editable installs, no test deps).
+
+# ─── Stage 1: builder ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    UV_LINK_MODE=copy \
+    UV_SYSTEM_PYTHON=1
+
+# Build deps for rasterio / pyproj wheels (manylinux usually has them but
+# leave the toolchain available for any source builds).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv for fast, reproducible installs from pyproject.toml
+COPY --from=ghcr.io/astral-sh/uv:0.5.4 /uv /usr/local/bin/uv
+
+WORKDIR /build
+
+# Sibling packages (referenced via [tool.uv.sources] path = "..." in api/pyproject.toml)
+COPY packages/shared/py    /build/packages/shared/py
+COPY packages/codex        /build/packages/codex
+COPY packages/swarm        /build/packages/swarm
+
+# API package
+COPY packages/api/pyproject.toml /build/packages/api/pyproject.toml
+COPY packages/api/uv.lock        /build/packages/api/uv.lock
+COPY packages/api/README.md      /build/packages/api/README.md
+COPY packages/api/app            /build/packages/api/app
+
+# Install runtime deps (no [dev] — no pytest, no mongomock).
+WORKDIR /build/packages/api
+RUN uv pip install --system --no-cache "."
+
+# ─── Stage 2: runtime ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000 \
+    HOST=0.0.0.0
+
+# Minimal runtime deps for rasterio (libproj, libgeos already on slim via wheels;
+# tini gives us PID 1 signal handling for clean docker stop).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tini ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system app && useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
+
+# Copy site-packages + console scripts from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# App code (post-deps so source edits don't bust the deps layer)
+COPY --chown=app:app packages/api/app /app/app
+
+# /tmp dirs the app mounts as static (decks, flux, swarm artifacts)
+RUN mkdir -p /tmp/decks /tmp/flux /tmp/swarm-decks /tmp/swarm-tts \
+    && chown -R app:app /tmp/decks /tmp/flux /tmp/swarm-decks /tmp/swarm-tts
+
+WORKDIR /app
+USER app
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+    CMD python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)"
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+# No --reload, no bind-mount — production. Single worker keeps SSE + lifespan
+# state coherent; scale horizontally via replicas, not in-process workers.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${HOST} --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]

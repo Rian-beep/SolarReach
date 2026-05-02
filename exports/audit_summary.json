@@ -1,0 +1,35 @@
+{
+  "row_count": 294,
+  "actions": {
+    "lead.scan.create": 73,
+    "lead.pitch": 8,
+    "lead.build_org": 8,
+    "api.call": 59,
+    "ch.search": 4,
+    "inbound.lead": 2,
+    "ch.officers": 33,
+    "lead.refresh_directors": 33,
+    "swarm.atlas.query": 29,
+    "swarm.atlas.vector_search": 37,
+    "voice.session": 4,
+    "test.ping": 2,
+    "integration.agent_event": 1,
+    "ch.company": 1
+  },
+  "actors": {
+    "system": 187,
+    "agent_a7_search": 3,
+    "agent_a7_refresh_directors": 33,
+    "agent_swarm": 66,
+    "agent_test": 2,
+    "agent_a7_officers": 1,
+    "rian-project1/smoke": 1,
+    "agent_a7_company": 1
+  },
+  "total_cost_cents": 129,
+  "distinct_lead_count": 23,
+  "distinct_recipient_hash_count": 0,
+  "earliest_ts": "2026-05-02T12:10:00.648240+00:00",
+  "latest_ts": "2026-05-02T15:26:16.388627+00:00",
+  "exported_at": "2026-05-02T15:26:43.319452+00:00"
+}

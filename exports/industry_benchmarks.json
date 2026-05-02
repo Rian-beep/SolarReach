@@ -1,0 +1,26 @@
+{
+  "uk_install_cost_per_kw_gbp": 950.0,
+  "uk_install_cost_per_kw_range_gbp": [
+    800.0,
+    1100.0
+  ],
+  "uk_avg_irradiance_kwh_per_m2_yr": 1050.0,
+  "uk_typical_kwh_per_kwp_yr": 950.0,
+  "performance_derate_pct": 0.85,
+  "panel_degradation_per_year": 0.005,
+  "seg_export_rate_gbp_per_kwh": 0.15,
+  "import_rate_gbp_per_kwh": 0.27,
+  "vat_residential_pct": 0.0,
+  "aia_cap_gbp_million": 1.0,
+  "full_expensing_available": true,
+  "co2_kg_per_kwh_uk_2025": 0.193,
+  "co2_kg_per_tree_per_year": 22.0,
+  "uk_typical_payback_years_commercial": 7.5,
+  "uk_typical_payback_range_years": [
+    6.0,
+    10.0
+  ],
+  "uk_typical_irr_commercial": 0.1,
+  "uk_commercial_pv_growth_yoy_pct": 0.21,
+  "uk_commercial_electricity_price_rise_since_2019_pct": 0.78
+}

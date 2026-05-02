@@ -95,10 +95,17 @@ const GOOGLE_MAPS_API_KEY =
   ((import.meta as unknown as { env?: Record<string, string> }).env
     ?.VITE_GOOGLE_MAPS_API_KEY ?? "") as string;
 
-// UK-wide overview camera. Google 3D tiles cap altitude/range around ~25km.
-// 8km altitude + 80km range + 35° tilt = aerial 3D "whole UK" framing.
-const UK_CENTER = { lat: 54.5, lng: -2.5, alt: 8000 };
-const UK_RANGE = 80000;
+// Boot camera. The Google Maps Photorealistic 3D SDK only allocates its
+// WebGL renderer + starts streaming tiles when the camera is within its
+// supported envelope (~25km range max). The previous "whole UK" framing
+// (range 80km, alt 8km) sat OUTSIDE that envelope, so the SDK never
+// painted — the user saw a blue grid placeholder forever. Boot at a
+// London-wide aerial framing instead: range 12km + 35° tilt shows the
+// whole tech-corridor postcode area in photorealistic 3D, then App.tsx's
+// auto-scan flies the camera the rest of the way down to the default
+// postcode. That gives us pixels on screen from frame 1.
+const UK_CENTER = { lat: 51.5074, lng: -0.1278, alt: 200 };
+const UK_RANGE = 12000;
 const UK_TILT = 35; // aerial 3D default — user can two-finger swipe to flatten
 
 // First-scan-complete camera tuning — drop straight to building-level

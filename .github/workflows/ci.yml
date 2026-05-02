@@ -10,45 +10,67 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PNPM_VERSION: "9.12.0"
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.5.4"
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Lint + typecheck (TS via biome/tsc, Py via ruff)
+  # ---------------------------------------------------------------------------
   lint-and-typecheck:
     name: lint + typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9.12.0
+          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: |
+            packages/api/pyproject.toml
+            packages/codex/pyproject.toml
+            packages/swarm/pyproject.toml
+            packages/shared/py/pyproject.toml
 
       - name: pnpm install
         run: pnpm install --no-frozen-lockfile
 
-      - name: ruff check
+      # Lint is informational while the hackathon codebase is being cleaned up
+      # (260+ auto-fixable ruff findings, biome backlog). Typecheck is strict.
+      - name: ruff check (informational)
         run: |
           uv tool install ruff
-          ruff check . || true
-          ruff format --check . || true
+          ruff check . || echo "::warning::ruff findings — run 'ruff check --fix .' locally"
+          ruff format --check . || echo "::warning::ruff format drift"
 
-      - name: biome check
-        run: pnpm exec biome check packages/web || true
+      - name: biome check (informational)
+        run: pnpm exec biome check packages/web || echo "::warning::biome findings"
 
-      - name: ts typecheck
-        run: pnpm -r typecheck || true
+      - name: ts typecheck (workspace) — strict
+        run: pnpm -r typecheck
 
+  # ---------------------------------------------------------------------------
+  # Validate CONTRACTS.md ↔ FastAPI route parity
+  # ---------------------------------------------------------------------------
   validate-contracts:
     name: validate contracts
     runs-on: ubuntu-latest
@@ -56,30 +78,169 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
       - run: python scripts/validate_contracts.py
 
-  api-smoke:
-    name: api smoke (mongomock)
+  # ---------------------------------------------------------------------------
+  # Unit tests for Python packages — mongomock-motor, no live infra
+  # ---------------------------------------------------------------------------
+  pytest:
+    name: pytest (${{ matrix.package }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [api, codex, swarm, shared/py]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - name: install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> $GITHUB_PATH
-      - name: install api deps
-        working-directory: packages/api
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: install uv (with cache)
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: |
+            packages/${{ matrix.package }}/pyproject.toml
+            packages/${{ matrix.package }}/uv.lock
+
+      - name: install package + dev deps
+        working-directory: packages/${{ matrix.package }}
         run: |
           uv venv
-          uv pip install -e ".[dev]" || \
-          uv pip install fastapi uvicorn motor pydantic pydantic-settings sse-starlette httpx anthropic redis celery python-multipart pytest pytest-asyncio mongomock-motor
-      - name: pytest (skip if no tests yet)
-        working-directory: packages/api
+          uv pip install -e ".[dev]"
+
+      - name: pytest
+        working-directory: packages/${{ matrix.package }}
+        env:
+          # Force in-memory mongo + no live keys
+          MONGO_URI: "mongodb://localhost:27017/?authSource=admin"
+          MONGO_DB: "solarreach_test"
+          ANTHROPIC_API_KEY: ""
+          ELEVENLABS_API_KEY: ""
+          GOOGLE_MAPS_API_KEY: ""
+          SOLARREACH_LIVE_OUTBOUND: "false"
         run: |
           if [ -d tests ] && [ -n "$(ls -A tests 2>/dev/null)" ]; then
             uv run pytest -q
           else
-            echo "no tests yet — skipping"
+            echo "no tests in packages/${{ matrix.package }} — skipping"
           fi
+
+  # ---------------------------------------------------------------------------
+  # Smoke: boot the API, hit /health, expect 200 + {status, services}
+  # Uses mongomock-motor in-process — no Docker, no real Mongo.
+  # ---------------------------------------------------------------------------
+  api-smoke:
+    name: api smoke (boot + /health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: pytest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: install uv (with cache)
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: |
+            packages/api/pyproject.toml
+            packages/api/uv.lock
+
+      - name: install api
+        working-directory: packages/api
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: boot api in background
+        working-directory: packages/api
+        env:
+          MONGO_URI: "mongodb://localhost:27017/?authSource=admin"
+          MONGO_DB: "solarreach_test"
+          ANTHROPIC_API_KEY: ""
+          ELEVENLABS_API_KEY: ""
+          GOOGLE_MAPS_API_KEY: ""
+          SOLARREACH_LIVE_OUTBOUND: "false"
+        run: |
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
+
+      - name: wait for /health (up to 30s)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health > /tmp/health.json; then
+              echo "api up after ${i}s"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::api never returned /health"
+          tail -200 /tmp/api.log || true
+          exit 1
+
+      - name: assert /health shape
+        run: |
+          python - <<'PY'
+          import json, sys
+          body = json.load(open("/tmp/health.json"))
+          assert "status" in body, body
+          assert "services" in body, body
+          for k in ("mongo", "anthropic_reachable", "redis"):
+              assert k in body["services"], f"missing {k}"
+              assert isinstance(body["services"][k], bool), f"{k} must be bool"
+          print("health OK:", body)
+          PY
+
+      - name: stop api
+        if: always()
+        run: |
+          if [ -f /tmp/api.pid ]; then kill "$(cat /tmp/api.pid)" 2>/dev/null || true; fi
+
+  # ---------------------------------------------------------------------------
+  # Build the production web bundle (catches type + bundling regressions)
+  # ---------------------------------------------------------------------------
+  web-build:
+    name: web build (vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --no-frozen-lockfile
+
+      - name: build web bundle
+        working-directory: packages/web
+        env:
+          # Build-time public vars — empty placeholders are fine for CI.
+          VITE_API_BASE: "http://localhost:8000"
+          VITE_GOOGLE_MAPS_API_KEY: ""
+        run: pnpm build
+
+      - name: upload web dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-${{ github.sha }}
+          path: packages/web/dist
+          retention-days: 7
