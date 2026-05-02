@@ -198,9 +198,12 @@ export function App() {
               </div>
 
               {/* Global RADIANCE heatmap — inferno blobs at every lead's
-                  geo location, camera-coupled. Sits above the 3D scene
-                  (z-10) but below the HUD overlays (z-20+). Toggled by
-                  the RADIANCE layer chip. */}
+                  geo location, camera-coupled via a pinhole-perspective
+                  projection (alpha SDK doesn't expose coordinateToPixel,
+                  so RadianceCanvas replicates the camera math from
+                  center/range/tilt/heading + listens to gmp-camerachange
+                  for tight redraw cadence). Sits above the 3D scene
+                  (z-10) but below the HUD overlays (z-20+). */}
               <ErrorBoundary scope="radiance-canvas">
                 <RadianceCanvas enabled={layers.radiance} />
               </ErrorBoundary>
