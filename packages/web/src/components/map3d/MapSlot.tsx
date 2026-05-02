@@ -94,25 +94,26 @@ const GOOGLE_MAPS_API_KEY =
   ((import.meta as unknown as { env?: Record<string, string> }).env
     ?.VITE_GOOGLE_MAPS_API_KEY ?? "") as string;
 
-// UK-wide overview camera. Google 3D tiles cap altitude/range around ~25km;
-// values above that throw a generic "didn't load Maps correctly" error.
-// 8km altitude + 80km range + 0° tilt = top-down "whole UK" framing.
+// UK-wide overview camera. Google 3D tiles cap altitude/range around ~25km.
+// 8km altitude + 80km range + 35° tilt = aerial 3D "whole UK" framing.
 const UK_CENTER = { lat: 54.5, lng: -2.5, alt: 8000 };
 const UK_RANGE = 80000;
-const UK_TILT = 0; // top-down default (user can two-finger swipe up to tilt)
+const UK_TILT = 35; // aerial 3D default — user can two-finger swipe to flatten
 
-// First-scan-complete camera tuning
-const SCAN_RANGE = 2000;
-const SCAN_TILT = 0; // also top-down — user controls tilt explicitly
+// First-scan-complete camera tuning — drop straight to building-level
+// oblique view so the user sees actual photorealistic 3D buildings, not
+// terrain. 400m range + 67° tilt is "Google Earth aerial of the postcode".
+const SCAN_RANGE = 400;
+const SCAN_TILT = 67;
 
-// Lead-selected camera tuning
-const LEAD_RANGE = 220;
-const LEAD_TILT = 45; // oblique on lead drill-down (within user's 0-45 range)
-const LEAD_ALT = 80;
+// Lead-selected camera tuning — close oblique view of the building.
+const LEAD_RANGE = 200;
+const LEAD_TILT = 67;
+const LEAD_ALT = 60;
 
 // Two-finger swipe → tilt mapping
 const TILT_MIN = 0;
-const TILT_MAX = 45;
+const TILT_MAX = 67; // up to fully oblique
 const TILT_PER_DELTA_PX = 0.18; // pixels of vertical scroll per degree of tilt
 
 // Animation durations (ms). Linear / ease-out only per Gotham theme.
@@ -475,7 +476,6 @@ export function MapSlot({
                 key={lead._id}
                 ref={(el) => {
                   if (!el) return;
-                  // Same imperative property setter for markers.
                   const mk = el as unknown as Record<string, unknown>;
                   mk.position = { lat, lng, altitude: 30 };
                   mk.altitudeMode = "RELATIVE_TO_GROUND";
@@ -487,6 +487,64 @@ export function MapSlot({
               />
             );
           })}
+
+        {/* Per-building radiance overlay — translucent rooftop polygon tinted
+            by composite_score. This is the "solar radiance on top of every
+            building" feel; pixel-accurate flux is in the drawer. */}
+        {showPolygons &&
+          leads.map((lead) => {
+            const ring = lead.rooftop_polygon?.coordinates?.[0];
+            if (!ring || ring.length < 3) return null;
+            const score = lead.scores?.composite_score ?? 0;
+            // Score → fill / stroke (Gotham-aligned cyan/amber/red, low alpha).
+            const fill =
+              score >= 70 ? "#20D08240" : score >= 50 ? "#FFB02040" : "#FF475740";
+            const stroke =
+              score >= 70 ? "#20D082" : score >= 50 ? "#FFB020" : "#FF4757";
+            // gmp-polygon-3d-element wants an array of {lat, lng, altitude}.
+            const outer = ring.map(([cLng, cLat]) => ({
+              lat: cLat,
+              lng: cLng,
+              altitude: 6,
+            }));
+            return (
+              <gmp-polygon-3d-element
+                key={`bldg-${lead._id}`}
+                ref={(el) => {
+                  if (!el) return;
+                  const p = el as unknown as Record<string, unknown>;
+                  p.outerCoordinates = outer;
+                  p.altitudeMode = "RELATIVE_TO_GROUND";
+                  p.fillColor = fill;
+                  p.strokeColor = stroke;
+                  p.strokeWidth = 1;
+                  p.extruded = false;
+                  el.setAttribute("data-lead-id", lead._id);
+                }}
+              />
+            );
+          })}
+
+        {/* Search target marker — drops at the centroid of the just-scanned
+            postcode so the user sees "I searched here". Distinct from lead
+            markers via the cyan label and altitude-clamp. */}
+        {centroid && (
+          <gmp-marker-3d-interactive-element
+            key="search-target"
+            ref={(el) => {
+              if (!el) return;
+              const mk = el as unknown as Record<string, unknown>;
+              mk.position = {
+                lat: centroid.lat,
+                lng: centroid.lng,
+                altitude: 80,
+              };
+              mk.altitudeMode = "RELATIVE_TO_GROUND";
+              mk.label = "◎ SCAN TARGET";
+              el.setAttribute("data-search-target", "1");
+            }}
+          />
+        )}
       </gmp-map-3d>
     </div>
   );
