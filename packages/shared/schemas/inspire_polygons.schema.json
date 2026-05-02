@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "solarreach://schemas/inspire_polygons.schema.json",
+  "title": "InspirePolygon",
+  "type": "object",
+  "required": ["_id", "inspire_id", "polygon", "centroid"],
+  "additionalProperties": true,
+  "properties": {
+    "_id": { "type": "string", "pattern": "^inspire_" },
+    "inspire_id": { "type": "string" },
+    "borough": { "type": ["string", "null"] },
+    "polygon": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": { "const": "Polygon" },
+        "coordinates": { "type": "array" }
+      }
+    },
+    "area_m2_approx": { "type": "number" },
+    "centroid": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": { "const": "Point" },
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        }
+      }
+    }
+  }
+}

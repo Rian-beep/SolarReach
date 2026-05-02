@@ -1,0 +1,22 @@
+{
+  "name": "solarreach",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Operations cockpit for the UK commercial solar industry — MongoDB Agentic Evolution Hackathon submission.",
+  "license": "MIT",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check packages",
+    "format": "biome format --write packages"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4"
+  }
+}

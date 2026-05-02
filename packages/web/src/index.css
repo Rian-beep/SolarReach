@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #070b14;
+  --color-gotham-dark: #0f1422;
+  --color-gotham-mid: #161b2c;
+  --color-gotham-line: #212741;
+  --color-solar-amber: #f5a524;
+  --color-solar-magenta: #e6428e;
+  --color-solar-emerald: #10b981;
+  --color-solar-red: #ef4444;
+  --color-ink-primary: #e6ecf8;
+  --color-ink-secondary: #a1abc4;
+  --color-ink-muted: #6b7591;
+  --color-accent-blue: #3b82f6;
+  --color-accent-violet: #8b5cf6;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", Menlo, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: radial-gradient(1200px 600px at 12% -10%, rgba(59, 130, 246, 0.07), transparent 60%),
+    radial-gradient(900px 500px at 95% 0%, rgba(245, 165, 36, 0.05), transparent 55%),
+    radial-gradient(800px 600px at 50% 110%, rgba(230, 66, 142, 0.04), transparent 60%), #070b14;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Custom scrollbar */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Focus rings — keyboard only */
+:where(button, a, input, [role="button"]):focus-visible {
+  outline: 2px solid #f5a524;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Shimmer skeleton */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}

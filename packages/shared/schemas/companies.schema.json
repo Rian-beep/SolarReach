@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "solarreach://schemas/companies.schema.json",
+  "title": "Company",
+  "type": "object",
+  "required": ["_id", "name"],
+  "additionalProperties": true,
+  "properties": {
+    "_id": { "type": "string", "pattern": "^company_" },
+    "name": { "type": "string" },
+    "ch_number": { "type": ["string", "null"] },
+    "registered_address": { "type": ["string", "null"] },
+    "title_number": { "type": ["string", "null"] },
+    "ccod_proprietor_name": { "type": ["string", "null"] },
+    "property_address": { "type": ["string", "null"] },
+    "directors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "embedding": {
+      "type": ["array", "null"],
+      "items": { "type": "number" }
+    }
+  }
+}

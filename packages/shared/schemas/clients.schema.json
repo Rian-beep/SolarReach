@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "solarreach://schemas/clients.schema.json",
+  "title": "Client",
+  "type": "object",
+  "required": ["_id", "name"],
+  "additionalProperties": true,
+  "properties": {
+    "_id": { "type": "string" },
+    "name": { "type": "string" },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "primary": { "type": "string" },
+        "logo_url": { "type": "string" }
+      }
+    },
+    "pricing": {
+      "type": "object",
+      "properties": {
+        "panel_unit_gbp": { "type": "number" },
+        "install_per_kw_gbp": { "type": "number" }
+      }
+    },
+    "session_budget_gbp": { "type": "number" }
+  }
+}

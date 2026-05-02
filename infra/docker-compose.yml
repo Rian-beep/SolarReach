@@ -1,0 +1,159 @@
+# SolarReach — local stack
+# Owned by A5. Cardinal: HMR bind-mounts on api + web (without them, code changes don't reflect).
+# Run from repo root: `make dev`
+
+name: solarreach
+
+networks:
+  solarreach:
+    driver: bridge
+
+volumes:
+  mongo-data:
+  redis-data:
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: solarreach-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-solarreach}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-solarreach}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-solarreach}
+    volumes:
+      - mongo-data:/data/db
+      - ./mongodb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [solarreach]
+
+  redis:
+    image: redis:7-alpine
+    container_name: solarreach-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [solarreach]
+
+  api:
+    build:
+      context: ../packages/api
+      dockerfile: Dockerfile
+    container_name: solarreach-api
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env.local
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://solarreach:solarreach@mongo:27017/solarreach?authSource=admin}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # CARDINAL: HMR bind-mount. Without this, code changes won't reflect.
+      - ../packages/api/app:/app/app:ro
+      - ../packages/shared:/shared:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [solarreach]
+
+  codex:
+    build:
+      context: ../packages/codex
+      dockerfile: Dockerfile
+    container_name: solarreach-codex
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../.env.local
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://solarreach:solarreach@mongo:27017/solarreach?authSource=admin}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../packages/codex/codex_brain:/app/codex_brain:ro
+      - ../packages/shared:/shared:ro
+    networks: [solarreach]
+
+  voice:
+    build:
+      context: ../packages/voice
+      dockerfile: Dockerfile
+    container_name: solarreach-voice
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../.env.local
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://solarreach:solarreach@mongo:27017/solarreach?authSource=admin}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../packages/voice/voice_service:/app/voice_service:ro
+      - ../packages/shared:/shared:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [solarreach]
+
+  web:
+    build:
+      context: ../packages/web
+      dockerfile: Dockerfile
+    container_name: solarreach-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:5173"
+    env_file:
+      - ../.env.local
+    environment:
+      VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
+      VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-${GOOGLE_MAPS_API_KEY:-}}
+    volumes:
+      # CARDINAL: HMR bind-mounts. Vite watcher must see host changes.
+      - ../packages/web/src:/app/src
+      - ../packages/web/index.html:/app/index.html
+      - ../packages/web/vite.config.ts:/app/vite.config.ts
+      - ../packages/web/package.json:/app/package.json
+      - ../packages/web/tsconfig.json:/app/tsconfig.json
+      - ../packages/web/postcss.config.js:/app/postcss.config.js
+    networks: [solarreach]

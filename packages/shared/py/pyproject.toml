@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "solarreach-shared"
+version = "0.1.0"
+description = "SolarReach shared models, financial math, compliance helpers."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "SolarReach Team" }]
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.9",
+    "motor>=3.6",
+    "pymongo>=4.10",
+    "lxml>=5",
+    "pyproj>=3.6",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "shapely>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["solarreach_shared"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

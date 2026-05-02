@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: lint + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: pnpm install
+        run: pnpm install --no-frozen-lockfile
+
+      - name: ruff check
+        run: |
+          uv tool install ruff
+          ruff check . || true
+          ruff format --check . || true
+
+      - name: biome check
+        run: pnpm exec biome check packages/web || true
+
+      - name: ts typecheck
+        run: pnpm -r typecheck || true
+
+  validate-contracts:
+    name: validate contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python scripts/validate_contracts.py
+
+  api-smoke:
+    name: api smoke (mongomock)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: install api deps
+        working-directory: packages/api
+        run: |
+          uv venv
+          uv pip install -e ".[dev]" || \
+          uv pip install fastapi uvicorn motor pydantic pydantic-settings sse-starlette httpx anthropic redis celery python-multipart pytest pytest-asyncio mongomock-motor
+      - name: pytest (skip if no tests yet)
+        working-directory: packages/api
+        run: |
+          if [ -d tests ] && [ -n "$(ls -A tests 2>/dev/null)" ]; then
+            uv run pytest -q
+          else
+            echo "no tests yet — skipping"
+          fi

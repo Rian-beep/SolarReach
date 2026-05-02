@@ -1,0 +1,44 @@
+# SolarReach root tooling config.
+# Each package has its own pyproject.toml for runtime deps. This file is workspace-level
+# tooling only (ruff, ty, pytest defaults). Owned by A5.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+  "data",
+  ".venv",
+  "node_modules",
+  "**/__pycache__",
+  "**/dist",
+  "**/build",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # bugbear
+  "UP",   # pyupgrade
+  "SIM",  # simplify
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "E501",  # line too long — formatter handles
+  "B008",  # do not perform function call in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.ty]
+# ty is Astral's new type checker — strict-ish defaults for hackathon speed.
+respect-ignore-files = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages", "tests"]
+addopts = "-q --tb=short"

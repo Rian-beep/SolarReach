@@ -1,0 +1,47 @@
+# SolarReach — production reverse proxy (optional).
+# Usage: `caddy run --config infra/Caddyfile` on a host with DNS pointed at A records.
+# Replace solarreach.example.com with the actual domain before deployment.
+
+{
+	# Global options
+	email luke@solarreach.example.com
+}
+
+solarreach.example.com {
+	encode zstd gzip
+
+	# API
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+
+	# Voice service (signed URL issuance + sidecar)
+	handle /voice/* {
+		reverse_proxy voice:8001
+	}
+
+	# SSE — disable buffering
+	handle /scan/*/stream {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+
+	# Frontend (Vite dev server in dev; static build in prod)
+	handle {
+		reverse_proxy web:5173
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

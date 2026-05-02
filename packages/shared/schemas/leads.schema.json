@@ -1,0 +1,132 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "solarreach://schemas/leads.schema.json",
+  "title": "Lead",
+  "type": "object",
+  "required": ["_id", "client_id", "address", "postcode", "premises_type", "geo", "created_at"],
+  "additionalProperties": true,
+  "properties": {
+    "_id": { "type": "string", "pattern": "^lead_" },
+    "client_id": { "type": "string" },
+    "address": { "type": "string" },
+    "postcode": { "type": "string" },
+    "borough": { "type": "string" },
+    "premises_type": {
+      "type": "string",
+      "enum": ["office", "leisure", "warehouse", "retail", "education", "residential", "mixed"]
+    },
+    "geo": {
+      "type": "object",
+      "required": ["point"],
+      "properties": {
+        "point": {
+          "type": "object",
+          "required": ["type", "coordinates"],
+          "properties": {
+            "type": { "const": "Point" },
+            "coordinates": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "rooftop_polygon": {
+      "type": "object",
+      "required": ["type", "coordinates", "source"],
+      "properties": {
+        "type": { "const": "Polygon" },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "number" }
+            }
+          }
+        },
+        "source": {
+          "type": "string",
+          "enum": ["inspire_index_polygon", "solar_api_bbox", "synthesized"]
+        },
+        "inspire_id": { "type": ["string", "null"] },
+        "area_m2_approx": { "type": ["number", "null"] }
+      }
+    },
+    "scores": {
+      "type": "object",
+      "properties": {
+        "solar_roi": { "type": "number", "minimum": 0, "maximum": 1 },
+        "financial_health": { "type": "number", "minimum": 0, "maximum": 1 },
+        "social_impact": { "type": "number", "minimum": 0, "maximum": 1 },
+        "composite_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "scored_at": { "type": "string" }
+      }
+    },
+    "owner": {
+      "type": "object",
+      "properties": {
+        "company_id": { "type": ["string", "null"] },
+        "company_name": { "type": "string" },
+        "source": { "type": "string", "enum": ["ccod", "ocod", "synthesized"] }
+      }
+    },
+    "decision_maker": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rationale": { "type": "string" }
+      }
+    },
+    "panel_layout": {
+      "type": "object",
+      "properties": {
+        "panels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "corners": { "type": "array" },
+              "tilt": { "type": "number" },
+              "azimuth": { "type": "number" },
+              "kwh_yr": { "type": "number" }
+            }
+          }
+        },
+        "panel_count": { "type": "integer", "minimum": 0 },
+        "annual_kwh": { "type": "number", "minimum": 0 },
+        "clipped_at": { "type": "string" },
+        "clip_method": { "type": "string" }
+      }
+    },
+    "flux_overlay": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "bbox": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number" } },
+        "vmin": { "type": "number" },
+        "vmax": { "type": "number" },
+        "cached_at": { "type": "string" }
+      }
+    },
+    "financial": {
+      "type": "object",
+      "properties": {
+        "capex_gbp": { "type": "number", "minimum": 0 },
+        "annual_saving_gbp": { "type": "number" },
+        "payback_years": { "type": "number" },
+        "npv_25yr_gbp": { "type": "number" }
+      }
+    },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" }
+  }
+}

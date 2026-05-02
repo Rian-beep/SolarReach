@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "solarreach://schemas/audit_log.schema.json",
+  "title": "AuditEvent",
+  "type": "object",
+  "required": ["_id", "ts", "actor", "action"],
+  "additionalProperties": true,
+  "properties": {
+    "_id": { "type": "string", "pattern": "^audit_" },
+    "ts": { "type": "string" },
+    "actor": { "type": "string" },
+    "action": { "type": "string" },
+    "lead_id": { "type": ["string", "null"] },
+    "cost_cents": { "type": ["integer", "number"] },
+    "recipient_sha256": { "type": ["string", "null"] },
+    "metadata": { "type": "object" }
+  }
+}

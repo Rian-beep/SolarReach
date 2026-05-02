@@ -1,0 +1,65 @@
+# claude code (keep agents/ for teammates, exclude local state)
+.claude/settings.local.json
+.claude/tdd-guard/
+
+# envs / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ty-cache/
+dist/
+build/
+*.egg-info/
+
+# node
+node_modules/
+.pnpm-store/
+.next/
+.vite/
+.turbo/
+
+# data — never commit raw govt zips or extracts
+data/raw/
+data/processed/
+data/*.zip
+data/*.gml
+data/*.csv
+!data/.gitkeep
+
+# generated
+packages/web/dist/
+packages/api/htmlcov/
+docs/reports/*.pdf
+docs/reports/*.pptx
+.coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# claude / mongo data dirs
+mongo-data/
+redis-data/
+
+# outbox (compliance gate output)
+outbox/
+
+# logs
+*.log
+logs/

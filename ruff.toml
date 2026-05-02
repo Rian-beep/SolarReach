@@ -1,0 +1,14 @@
+# Standalone ruff config — duplicates [tool.ruff] from pyproject.toml so editors
+# that only honor ruff.toml still pick it up. Keep these two in sync.
+line-length = 100
+target-version = "py312"
+extend-exclude = ["data", ".venv", "node_modules", "**/__pycache__", "**/dist", "**/build"]
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501", "B008"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

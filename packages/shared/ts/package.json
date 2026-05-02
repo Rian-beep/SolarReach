@@ -1,0 +1,32 @@
+{
+  "name": "@solarreach/shared",
+  "version": "0.1.0",
+  "description": "SolarReach shared TypeScript types + financial parity.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./models": {
+      "types": "./dist/models.d.ts",
+      "import": "./dist/models.js"
+    },
+    "./financial": {
+      "types": "./dist/financial.d.ts",
+      "import": "./dist/financial.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx src/financial.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.19.0"
+  }
+}
