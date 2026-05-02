@@ -92,10 +92,12 @@ const GOOGLE_MAPS_API_KEY =
   ((import.meta as unknown as { env?: Record<string, string> }).env
     ?.VITE_GOOGLE_MAPS_API_KEY ?? "") as string;
 
-// UK-wide overview camera (central England). 600km altitude / 500km range /
-// 30° tilt reads as "whole-country tactical view" on first paint.
-const UK_CENTER = { lat: 54.5, lng: -2.5, alt: 600000 };
-const UK_RANGE = 500000;
+// UK-wide overview camera. Google 3D tiles cap altitude/range around ~25km;
+// values above that throw a generic "didn't load Maps correctly" error.
+// 8km altitude + 80km range + 30° tilt gives a punchy "whole UK market" framing
+// without exceeding the alpha SDK limits.
+const UK_CENTER = { lat: 54.5, lng: -2.5, alt: 8000 };
+const UK_RANGE = 80000;
 const UK_TILT = 30;
 
 // First-scan-complete camera tuning
