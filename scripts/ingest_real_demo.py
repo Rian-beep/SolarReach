@@ -280,18 +280,19 @@ def _iter_polygons(gml_path: str) -> Iterator[tuple[str | None, list[tuple[float
             prev = elem.getprevious()
 
 
-def sample_polygons(
-    gml_path: str, want: int, rng: random.Random, area_min: float = 400.0, area_max: float = 5000.0,
+def _sample_one_gml(
+    gml_path: str,
+    want: int,
+    rng: random.Random,
+    source_label: str,
+    area_min: float,
+    area_max: float,
 ) -> list[dict]:
-    """Reservoir-sample `want` polygons whose area is in [area_min, area_max].
-
-    Each result has: inspire_id, ring_4326 (closed), area_m2_approx, centroid (lng,lat).
-    """
-    print(f"[ingest_real_demo] streaming {gml_path} (target sample={want})")
+    print(f"[ingest_real_demo] streaming {gml_path} (target sample={want}, source={source_label})")
     reservoir: list[dict] = []
     seen = 0
     kept = 0
-    for inspire_id, ring_27700 in _iter_camden_polygons(gml_path):
+    for inspire_id, ring_27700 in _iter_polygons(gml_path):
         seen += 1
         area = _shoelace(ring_27700)
         if not (area_min <= area <= area_max):
@@ -303,11 +304,12 @@ def sample_polygons(
             ring_4326.append(ring_4326[0])
         cx, cy = _ring_centroid(ring_4326)
         rec = {
-            "inspire_id": inspire_id or f"camden_{uuid.uuid4().hex[:12]}",
+            "inspire_id": inspire_id or f"{source_label}_{uuid.uuid4().hex[:12]}",
             "ring_4326": ring_4326,
             "area_m2_approx": round(area, 2),
             "centroid_lng": cx,
             "centroid_lat": cy,
+            "source_label": source_label,
         }
         kept += 1
         # Reservoir sampling (Algorithm R) — uniform without knowing total upfront.
@@ -317,11 +319,31 @@ def sample_polygons(
             j = rng.randint(0, kept - 1)
             if j < want:
                 reservoir[j] = rec
-
     print(
-        f"[ingest_real_demo] GML: read={seen} in_area_band={kept} sampled={len(reservoir)}"
+        f"[ingest_real_demo] {source_label}: read={seen} in_area_band={kept} sampled={len(reservoir)}"
     )
     return reservoir
+
+
+def sample_polygons(
+    sources: list[tuple[str, str, int]],
+    rng: random.Random,
+    area_min: float = 400.0,
+    area_max: float = 5000.0,
+) -> list[dict]:
+    """Sample polygons from multiple GML sources.
+
+    sources: list of (path, source_label, want_count).
+    """
+    out: list[dict] = []
+    for path, label, want in sources:
+        if want <= 0 or not os.path.exists(path):
+            if not os.path.exists(path):
+                print(f"WARN: skipping missing GML {path}", file=sys.stderr)
+            continue
+        out.extend(_sample_one_gml(path, want, rng, label, area_min, area_max))
+    rng.shuffle(out)
+    return out
 
 
 # --- CCOD streaming ---
@@ -408,6 +430,8 @@ def derive_subscores(rng: random.Random, composite: int, premises_type: str) -> 
         "office": (0.78, 0.80),
         "leisure": (0.72, 0.65),
         "education": (0.68, 0.55),
+        "residential": (0.70, 0.60),
+        "mixed": (0.74, 0.68),
     }.get(premises_type, (0.75, 0.70))
     solar = max(0.0, min(1.0, bias[0] + rng.gauss(0.0, 0.04)))
     fin = max(0.0, min(1.0, bias[1] + rng.gauss(0.0, 0.04)))
@@ -430,7 +454,13 @@ def build_lead_and_company(
     area_m2 = polygon["area_m2_approx"]
 
     postcode, borough = snap_to_postcode(cx, cy)
-    premises_type = _premises_type_for_area(rng, area_m2)
+    # City source = LU_Residential -> bias to residential/mixed; Camden = mixed.
+    if polygon.get("source_label") == "city":
+        premises_type = rng.choices(
+            ["residential", "mixed", "office"], weights=[0.65, 0.25, 0.10],
+        )[0]
+    else:
+        premises_type = _premises_type_for_area(rng, area_m2)
 
     composite = sample_composite_score(rng)
     solar_roi, fin_health, social_impact = derive_subscores(rng, composite, premises_type)
@@ -584,7 +614,14 @@ def reset_real(db) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("--count", type=int, default=300)
-    parser.add_argument("--gml-path", default=DEFAULT_GML)
+    parser.add_argument("--gml-camden", default=DEFAULT_GML_CAMDEN)
+    parser.add_argument("--gml-city", default=DEFAULT_GML_CITY)
+    parser.add_argument(
+        "--city-share",
+        type=float,
+        default=0.35,
+        help="Fraction of `count` to draw from City of London (rest from Camden).",
+    )
     parser.add_argument("--ccod-zip", default=DEFAULT_CCOD_ZIP)
     parser.add_argument("--client-id", default=CLIENT_ID_DEFAULT)
     parser.add_argument("--owner-sample", type=int, default=50)
@@ -592,9 +629,6 @@ def main() -> int:
                         help="Drop ONLY lead_real_*/company_real_* docs first.")
     args = parser.parse_args()
 
-    if not os.path.exists(args.gml_path):
-        print(f"ERROR: GML not found: {args.gml_path}", file=sys.stderr)
-        return 1
     if not os.path.exists(args.ccod_zip):
         print(f"ERROR: CCOD zip not found: {args.ccod_zip}", file=sys.stderr)
         return 1
@@ -608,8 +642,16 @@ def main() -> int:
 
     rng = random.Random(SEED)
 
-    # 1) Sample real polygons.
-    polygons = sample_polygons(args.gml_path, want=args.count, rng=rng)
+    # 1) Sample real polygons from both Camden + City sources.
+    city_n = int(round(args.count * args.city_share))
+    camden_n = args.count - city_n
+    polygons = sample_polygons(
+        sources=[
+            (args.gml_camden, "camden", camden_n),
+            (args.gml_city, "city", city_n),
+        ],
+        rng=rng,
+    )
     if len(polygons) < args.count:
         print(
             f"WARN: only {len(polygons)} polygons matched area filter "
