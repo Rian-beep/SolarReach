@@ -28,6 +28,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Lead, FluxOverlay, PanelLayout } from "@/lib/types";
 import type { LayerState } from "@/components/map3d/HUD-LayerToggle";
 import { useCameraStore } from "@/stores/useCameraStore";
+import { useSearchStore } from "@/stores/useSearchStore";
 
 declare global {
   interface Window {
@@ -364,6 +365,23 @@ export function MapSlot({
     return () => root.removeEventListener("gmp-camerachange", handler);
   }, [sdkReady, setCamera]);
 
+  // ── Search target (postcode-typed) → fly directly to that postcode ────
+  // Independent of leads — even if 0 leads match the postcode, the camera
+  // navigates to where the user pointed. Beats relying on the centroid of
+  // the SSE stream which can fire late or empty.
+  const searchTarget = useSearchStore((s) => s.target);
+  useEffect(() => {
+    if (!sdkReady || !mapRef.current || !searchTarget) return;
+    flyOrSnap(mapRef.current, {
+      lat: searchTarget.lat,
+      lng: searchTarget.lng,
+      alt: 60,
+      range: SCAN_RANGE,
+      tilt: SCAN_TILT,
+      durationMs: FLY_BOOT_TO_SCAN_MS,
+    });
+  }, [sdkReady, searchTarget?.postcode, searchTarget?.lat, searchTarget?.lng]);
+
   // First-scan-complete: leads JUST populated → fly to centroid (once).
   useEffect(() => {
     if (!sdkReady || !mapRef.current) return;
@@ -525,22 +543,25 @@ export function MapSlot({
             );
           })}
 
-        {/* Search target marker — drops at the centroid of the just-scanned
-            postcode so the user sees "I searched here". Distinct from lead
-            markers via the cyan label and altitude-clamp. */}
-        {centroid && (
+        {/* Search target marker — drops at the postcode-typed coordinates
+            (postcodes.io geocode), independent of how many leads match.
+            Falls back to leads-centroid if the geocode failed. */}
+        {(searchTarget || centroid) && (
           <gmp-marker-3d-interactive-element
             key="search-target"
             ref={(el) => {
               if (!el) return;
               const mk = el as unknown as Record<string, unknown>;
+              const t = searchTarget ?? centroid!;
               mk.position = {
-                lat: centroid.lat,
-                lng: centroid.lng,
+                lat: t.lat,
+                lng: t.lng,
                 altitude: 80,
               };
               mk.altitudeMode = "RELATIVE_TO_GROUND";
-              mk.label = "◎ SCAN TARGET";
+              mk.label = searchTarget
+                ? `◎ ${searchTarget.postcode}`
+                : "◎ SCAN TARGET";
               el.setAttribute("data-search-target", "1");
             }}
           />

@@ -4,8 +4,34 @@ import { Button } from "@/components/ui/Button";
 import { useScan, API_BASE } from "@/lib/api";
 import { formatPostcode } from "@/lib/utils";
 import { useLeadStore } from "@/stores/useLeadStore";
+import { useSearchStore } from "@/stores/useSearchStore";
 import type { Lead } from "@/lib/types";
 import { SpendIndicator } from "./SpendIndicator";
+
+/**
+ * Geocode a UK postcode via postcodes.io (free, no key, sub-100ms).
+ * Returns null on any failure — caller can fall back to leads-centroid.
+ */
+async function geocodePostcode(
+  postcode: string,
+): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = `https://api.postcodes.io/postcodes/${encodeURIComponent(
+      postcode,
+    )}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      result?: { latitude?: number; longitude?: number };
+    };
+    const lat = json.result?.latitude;
+    const lng = json.result?.longitude;
+    if (typeof lat !== "number" || typeof lng !== "number") return null;
+    return { lat, lng };
+  } catch {
+    return null;
+  }
+}
 
 // SSE reconnect tuning — covers Mongo blips / Atlas fail-overs mid-demo.
 // Backoff: 1s → 2s → 4s → 8s → 8s, then give up.
@@ -23,6 +49,7 @@ export function Header({ mode, onModeChange, atlasStatus = "live" }: HeaderProps
   const [postcode, setPostcode] = useState("");
   const scan = useScan();
   const addLead = useLeadStore((s) => s.addLead);
+  const setSearchTarget = useSearchStore((s) => s.setTarget);
 
   // Track the live EventSource + reconnect timer so unmount tears down cleanly
   // and a second SCAN click cancels the previous stream.
@@ -106,12 +133,19 @@ export function Header({ mode, onModeChange, atlasStatus = "live" }: HeaderProps
       return;
     }
     const pretty = formatPostcode(trimmed);
+    // Fire geocode + scan in parallel — geocode resolves first (sub-100ms via
+    // postcodes.io) and lets the camera fly to the searched postcode
+    // immediately, regardless of how many leads match.
+    const geocodePromise = geocodePostcode(pretty).then((coords) => {
+      if (coords) setSearchTarget({ postcode: pretty, ...coords });
+      return coords;
+    });
     try {
-      const res = await scan.mutateAsync({ postcode: pretty });
+      const [, res] = await Promise.all([
+        geocodePromise,
+        scan.mutateAsync({ postcode: pretty }),
+      ]);
       toast.success(`Scan started — ${res.lead_count} leads incoming`);
-      // Stream incoming leads into the store as the SSE emits them. This
-      // gives the "markers stream in real-time" feel called out in the
-      // demo runbook (Atlas Change Streams behind the SSE).
       const streamUrl = res.stream_url.startsWith("http")
         ? res.stream_url
         : `${API_BASE}${res.stream_url}`;
