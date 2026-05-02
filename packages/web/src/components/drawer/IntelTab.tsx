@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { useBuildOrg, useDirectors } from "@/lib/api";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { computeRoi, formatYears } from "@/lib/financial";
-import { gbp } from "@/lib/utils";
+import { caption, gbp } from "@/lib/utils";
 import type { Lead } from "@/lib/types";
 
 interface IntelTabProps {
@@ -48,15 +48,11 @@ export function IntelTab({ lead }: IntelTabProps) {
       {fin ? (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-1.5">
-                <Timer className="size-3.5 text-cyan" strokeWidth={1.5} />
-                PAYBACK
-              </CardTitle>
-              <span className="font-mono text-[10px] uppercase tracking-widest text-grid">
-                buyer · #1 question
-              </span>
-            </div>
+            <div className={caption}>buyer · #1 question</div>
+            <CardTitle className="flex items-center gap-1.5">
+              <Timer className="size-3.5 text-cyan" strokeWidth={1.5} />
+              PAYBACK
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex items-end justify-between gap-3">
@@ -64,9 +60,7 @@ export function IntelTab({ lead }: IntelTabProps) {
                 {formatYears(fin.payback_years)}
               </div>
               <div className="text-right leading-tight">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
-                  NPV 25YR
-                </div>
+                <div className={caption}>NPV 25YR</div>
                 <div className="font-mono text-md text-emerald tabular-nums">
                   {gbp(fin.npv_25yr_gbp)}
                 </div>
@@ -75,25 +69,19 @@ export function IntelTab({ lead }: IntelTabProps) {
             {/* 3-stat compact row */}
             <div className="grid grid-cols-3 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
               <div className="bg-app-surface px-2 py-1.5">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
-                  CAPEX
-                </div>
+                <div className={caption}>CAPEX</div>
                 <div className="font-mono text-sm text-bone tabular-nums">
                   {gbp(fin.capex_gbp)}
                 </div>
               </div>
               <div className="bg-app-surface px-2 py-1.5">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
-                  ANNUAL SAVING
-                </div>
+                <div className={caption}>ANNUAL SAVING</div>
                 <div className="font-mono text-sm text-bone tabular-nums">
                   {gbp(fin.annual_saving_gbp)}
                 </div>
               </div>
               <div className="bg-app-surface px-2 py-1.5">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
-                  ROI %
-                </div>
+                <div className={caption}>ROI %</div>
                 <div className="font-mono text-sm text-emerald tabular-nums">
                   {computeRoi(fin.capex_gbp, fin.annual_saving_gbp).toFixed(1)}%
                 </div>

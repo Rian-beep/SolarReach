@@ -21,7 +21,7 @@ import {
   UK_SEG_EXPORT_RATE_GBP_PER_KWH,
   type FundingModelId,
 } from "@/lib/financial";
-import { gbp } from "@/lib/utils";
+import { caption, gbp } from "@/lib/utils";
 import type { Lead } from "@/lib/types";
 
 interface ReferenceTabProps {
@@ -145,7 +145,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
       {/* ── Interactive Funding Model Selector ─────────────────────────── */}
       <Card>
         <CardHeader>
-          <div className="text-[10px] uppercase tracking-widest text-grid">
+          <div className={caption}>
             Click each · live monthly cash-flow
           </div>
           <CardTitle className="flex items-center gap-2">
@@ -194,7 +194,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                     {/* Monthly payment hero */}
                     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
                       <div className="bg-app-surface px-2 py-1.5">
-                        <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+                        <div className={caption}>
                           MONTHLY
                         </div>
                         <div className="font-mono text-lg text-cyan tabular-nums">
@@ -204,7 +204,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                         </div>
                       </div>
                       <div className="bg-app-surface px-2 py-1.5">
-                        <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+                        <div className={caption}>
                           TERM
                         </div>
                         <div className="font-mono text-lg text-bone tabular-nums">
@@ -228,7 +228,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                     {/* Pros / Cons */}
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <div>
-                        <div className="font-mono text-[10px] uppercase tracking-widest text-emerald">
+                        <div className={`${caption} text-emerald`}>
                           PROS
                         </div>
                         <ul className="mt-1 space-y-0.5">
@@ -244,7 +244,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                         </ul>
                       </div>
                       <div>
-                        <div className="font-mono text-[10px] uppercase tracking-widest text-red">
+                        <div className={`${caption} text-red`}>
                           CONS
                         </div>
                         <ul className="mt-1 space-y-0.5">
@@ -271,7 +271,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
       {/* ── TAX BREAKS · UK 2026 ────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <div className="text-[10px] uppercase tracking-widest text-grid">
+          <div className={caption}>
             UK incentives · {isResidential ? "residential" : "commercial"}
           </div>
           <CardTitle className="flex items-center gap-2">
@@ -291,7 +291,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                 £{UK_SEG_EXPORT_RATE_GBP_PER_KWH.toFixed(2)}/kWh
               </span>
             </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+            <div className={caption}>
               Ofgem 2026 · paid for exported energy
             </div>
             {annualKwh > 0 && (
@@ -316,7 +316,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
               </span>
               <Badge variant="emerald">100%</Badge>
             </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+            <div className={caption}>
               First £1M qualifying plant · until 2026-04-30
             </div>
             <div className="mt-1 font-mono text-[11px] text-mute">
@@ -336,7 +336,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
               </span>
               <Badge variant="red">EXPIRED</Badge>
             </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+            <div className={caption}>
               Ended 2023-04 · context only
             </div>
             <div className="mt-1 font-mono text-[11px] text-mute">
@@ -356,7 +356,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                 <Badge variant="amber">20% RECOVERABLE</Badge>
               )}
             </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+            <div className={caption}>
               {isResidential
                 ? "0% VAT · residential install (UK 2022-)"
                 : "20% standard · recoverable if VAT-registered"}
@@ -375,7 +375,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
                 <Badge variant="outline">RESIDENTIAL ONLY</Badge>
               )}
             </div>
-            <div className="font-mono text-[10px] uppercase tracking-widest text-grid">
+            <div className={caption}>
               Fuel-poor / EPC D-G + qualifying benefits
             </div>
           </div>
@@ -385,7 +385,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
       {/* ── REFERENCES ──────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <div className="text-[10px] uppercase tracking-widest text-grid">
+          <div className={caption}>
             Sources · UK government & open data
           </div>
           <CardTitle className="flex items-center gap-2">
@@ -443,7 +443,7 @@ export function ReferenceTab({ lead }: ReferenceTabProps) {
             </li>
           </ul>
           {fin && (
-            <div className="mt-3 border-t border-iron pt-2 font-mono text-[10px] uppercase tracking-widest text-grid">
+            <div className={`mt-3 border-t border-iron pt-2 ${caption}`}>
               Computed for this lead · payback{" "}
               <span className="text-bone tabular-nums">
                 {formatYears(fin.payback_years)}

@@ -52,3 +52,12 @@ export function formatLatLng(lng: number, lat: number): string {
 /** Sleep helper. */
 export const sleep = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Gotham caption className — single source of truth for tiny UPPERCASE labels
+ * (e.g. CAPEX, OWNER, LAT/LNG, "buyer · #1 question").
+ * Mono · 10px · widest tracking · grid color by default.
+ * Override the color by passing `cn(caption, "text-emerald")` etc.
+ */
+export const caption =
+  "font-mono text-[10px] uppercase tracking-widest text-grid";

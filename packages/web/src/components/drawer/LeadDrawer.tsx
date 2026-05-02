@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useDrawerStore } from "@/stores/useDrawerStore";
 import { Badge } from "@/components/ui/Badge";
+import { caption } from "@/lib/utils";
 import { IntelTab } from "./IntelTab";
 import { PitchTab } from "./PitchTab";
 import { VoiceTab } from "./VoiceTab";
@@ -48,7 +49,7 @@ export function LeadDrawer({ lead }: LeadDrawerProps) {
             {/* Header */}
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-iron px-5 py-4">
               <div className="min-w-0 flex-1">
-                <div className="text-[10px] uppercase tracking-widest text-grid">
+                <div className={caption}>
                   Lead · {lead._id.slice(0, 14)}…
                 </div>
                 <div className="mt-1 truncate font-mono text-base text-bone">
@@ -99,8 +100,12 @@ export function LeadDrawer({ lead }: LeadDrawerProps) {
               </div>
             </Tabs.Root>
 
-            <div className="shrink-0 border-t border-iron bg-app-surface px-5 py-2 font-mono text-[10px] uppercase tracking-widest text-grid">
-              ESC to close · ⌘K palette
+            <div className={`shrink-0 border-t border-iron bg-app-surface px-5 py-2 ${caption} flex items-center gap-1.5`}>
+              <kbd className="rounded-[2px] border border-iron-bright bg-app-elev-1 px-1 py-px text-bone">ESC</kbd>
+              <span>close</span>
+              <span className="text-iron-bright">·</span>
+              <kbd className="rounded-[2px] border border-iron-bright bg-app-elev-1 px-1 py-px text-bone">TAB</kbd>
+              <span>cycle tabs</span>
             </div>
           </motion.aside>
         </>

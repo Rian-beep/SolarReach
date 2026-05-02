@@ -19,7 +19,7 @@ export function CardHeader({
 }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col gap-1 p-3 pb-2", className)}
+      className={cn("flex flex-col gap-1 p-2.5 pb-1.5", className)}
       {...props}
     />
   );
@@ -56,7 +56,7 @@ export function CardContent({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("p-3 pt-0", className)} {...props} />;
+  return <div className={cn("p-2.5 pt-0", className)} {...props} />;
 }
 
 export function CardFooter({
@@ -66,7 +66,7 @@ export function CardFooter({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 p-3 pt-2 border-t border-iron",
+        "flex items-center gap-2 p-2.5 pt-1.5 border-t border-iron",
         className,
       )}
       {...props}
