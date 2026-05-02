@@ -12,15 +12,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
 from app.config import Settings
-from app.deps import get_app_settings, get_db
+from app.deps import get_app_settings, get_db, get_mongo_client
 from app.services.audit import log_audit
 from app.services.companies_house import CompaniesHouseClient
+from app.services.project1_link import (
+    fetch_project1_leads,
+    push_outreach_event,
+)
 
 router = APIRouter()
 log = logging.getLogger("solarreach.api.leads")
@@ -49,14 +53,33 @@ async def _join_lead(db: AsyncIOMotorDatabase, lead: dict) -> dict:
 
 @router.get("/leads")
 async def list_leads(
+    request: Request,
     client_id: str = Query(default="client-greensolar-uk"),
     limit: int = Query(default=50, le=200),
+    augment: str | None = Query(default=None, description="set to 'project1' to merge project1 agent-store notes"),
+    postcode: str | None = Query(default=None),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     """Return the most recently created leads for a client. Used by the
     frontend to bootstrap the map on app load before any scan has run.
     Sorted by composite_score desc so the highest-scoring markers render first.
+
+    If ``augment=project1`` is passed, leads pass through
+    ``services.project1_link.fetch_project1_leads`` which merges any agent
+    notes from the companion repo's long-term store.
     """
+    if augment == "project1":
+        # Pull the live motor client off app.state so the link layer can
+        # cross to the agent_store DB (different from our app DB).
+        motor_client = getattr(request.app.state, "mongo_client", None)
+        return await fetch_project1_leads(
+            db,
+            client_id=client_id,
+            postcode=postcode,
+            limit=limit,
+            motor_client=motor_client,
+        )
+
     cursor = (
         db.leads.find({"client_id": client_id})
         .sort([("scores.composite_score", -1), ("created_at", -1)])
@@ -64,6 +87,37 @@ async def list_leads(
     )
     docs = await cursor.to_list(length=limit)
     return docs
+
+
+# --- POST /lead/<id>/outreach_event (project1 link) ---
+
+class OutreachEventBody(BaseModel):
+    event_type: str
+    payload: dict[str, Any] | None = None
+    actor: str | None = None
+
+
+@router.post("/lead/{lead_id}/outreach_event")
+async def post_outreach_event(
+    lead_id: str,
+    body: OutreachEventBody,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Record an outreach event for a lead. Writes to ``outreach_events``
+    (created lazily with $jsonSchema validator). Idempotent only by
+    timestamp — callers wanting strict idempotency should pass an
+    ``actor``-scoped event_type.
+    """
+    lead = await db.leads.find_one({"_id": lead_id}, {"_id": 1})
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    event = {
+        "event_type": body.event_type,
+        "payload": body.payload or {},
+        "actor": body.actor or "system",
+    }
+    inserted_id = await push_outreach_event(db, lead_id=lead_id, event=event)
+    return {"ok": True, "id": inserted_id}
 
 
 # --- GET /lead/<id> ---
