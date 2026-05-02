@@ -25,6 +25,11 @@ dependencies = [
   "httpx>=0.27,<1",
   # Stdlib-adjacent helpers
   "typing-extensions>=4.12; python_version<'3.13'",
+"deepagents>=0.4,<1",
+  "langchain-anthropic>=0.2,<1",
+  "langgraph>=0.2,<1",
+  "langchain-core>=0.3,<1",
+
 ]
 
 [project.optional-dependencies]
