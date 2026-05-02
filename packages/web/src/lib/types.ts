@@ -153,10 +153,19 @@ export interface PitchResponse {
   deck_json: Record<string, unknown>;
 }
 
+export type VoiceProviderStatus =
+  | "ok"
+  | "demo_mode"
+  | "disclosure_pending"
+  | "upstream_error";
+
 export interface VoiceSignedUrl {
-  signed_url: string;
-  agent_id: string;
+  signed_url: string | null;
+  agent_id: string | null;
   system_prompt_filled: string;
+  status: VoiceProviderStatus;
+  message: string;
+  provider: string;
 }
 
 export interface CalculatorResponse {

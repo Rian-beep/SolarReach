@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Mic, MicOff, Radio } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Mic, MicOff, Radio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import {
@@ -14,7 +14,7 @@ import { useVoiceSignedUrl } from "@/lib/api";
 import { useVoiceStore } from "@/stores/useVoiceStore";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { startConversation } from "@/lib/elevenlabs";
-import type { Lead, TranscriptChunk } from "@/lib/types";
+import type { Lead, TranscriptChunk, VoiceSignedUrl } from "@/lib/types";
 
 interface VoiceTabProps {
   lead: Lead;
@@ -33,6 +33,8 @@ export function VoiceTab({ lead }: VoiceTabProps) {
   const appendChunk = useVoiceStore((s) => s.appendChunk);
   const { confirm } = useCostConfirm();
   const transcriptRef = useRef<HTMLDivElement>(null);
+  // Last server response — drives the demo-mode pill.
+  const [lastResult, setLastResult] = useState<VoiceSignedUrl | null>(null);
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -48,17 +50,41 @@ export function VoiceTab({ lead }: VoiceTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const fetchSignedUrl = async (): Promise<VoiceSignedUrl | null> => {
+    try {
+      const res = await signedUrl.mutateAsync(lead._id);
+      setLastResult(res);
+      return res;
+    } catch (err) {
+      // Real exception (network, 404, etc.) — not a graceful demo response.
+      const msg = (err as Error).message;
+      setError(msg);
+      toast.error(`Voice unavailable: ${msg}`);
+      setLastResult(null);
+      return null;
+    }
+  };
+
   const onRehearse = async () => {
     const ok = await confirm(
       VOICE_COST_CENTS,
       "Voice rehearsal (ElevenLabs ConvAI)",
     );
     if (!ok) return;
+    setStatus("connecting");
+    const res = await fetchSignedUrl();
+    if (!res) {
+      setStatus("idle");
+      return;
+    }
+    if (res.status !== "ok" || !res.signed_url) {
+      // Server returned graceful degrade — don't toast, the pill explains it.
+      setStatus("idle");
+      return;
+    }
     try {
-      setStatus("connecting");
-      const { signed_url } = await signedUrl.mutateAsync(lead._id);
       const session = await startConversation({
-        signedUrl: signed_url,
+        signedUrl: res.signed_url,
         onConnect: () => setStatus("connected"),
         onDisconnect: () => setStatus("ended"),
         onError: (err) => {
@@ -90,20 +116,23 @@ export function VoiceTab({ lead }: VoiceTabProps) {
     } catch (err) {
       const msg = (err as Error).message;
       setError(msg);
-      if (msg.includes("503") || msg.toLowerCase().includes("disclosure")) {
-        toast.error(
-          "Voice unavailable — check ELEVENLABS_API_KEY + AI disclosure",
-        );
-      } else {
-        toast.error(`Voice start failed: ${msg}`);
-      }
+      toast.error(`Voice start failed: ${msg}`);
+      setStatus("idle");
     }
+  };
+
+  const onRetry = async () => {
+    setStatus("idle");
+    setError(null);
+    await fetchSignedUrl();
   };
 
   const isLive =
     status === "connected" ||
     status === "speaking" ||
     status === "listening";
+
+  const pendingStatus = lastResult && lastResult.status !== "ok";
 
   return (
     <div className="space-y-3">
@@ -120,13 +149,23 @@ export function VoiceTab({ lead }: VoiceTabProps) {
                 {status.toUpperCase()}
               </Badge>
             )}
+            {!isLive && pendingStatus && (
+              <Badge variant="cyan" className="gap-1.5">
+                <span className="size-1.5 rounded-full bg-cyan animate-live-dot" />
+                {lastResult?.status === "demo_mode"
+                  ? "DEMO MODE"
+                  : lastResult?.status === "disclosure_pending"
+                    ? "DISCLOSURE PENDING"
+                    : "UPSTREAM ERROR"}
+              </Badge>
+            )}
           </div>
           <CardDescription>
             ElevenLabs ConvAI duplex audio. Transcript persists to{" "}
             <span className="font-mono text-cyan">calls_ts</span>.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-2">
           {!isLive ? (
             <Button
               onClick={onRehearse}
@@ -145,6 +184,34 @@ export function VoiceTab({ lead }: VoiceTabProps) {
               <MicOff className="size-3.5" strokeWidth={1.5} />
               [END CALL]
             </Button>
+          )}
+
+          {pendingStatus && lastResult && (
+            <div className="flex items-start gap-2 rounded-[2px] border border-cyan/40 bg-cyan/5 p-2 font-mono text-xs">
+              <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-cyan animate-live-dot" />
+              <div className="flex-1 leading-relaxed">
+                <div className="text-cyan uppercase tracking-wide">
+                  Voice integration pending
+                </div>
+                <div className="text-mute">
+                  {lastResult.message ||
+                    "Pulling from teammate's branch."}
+                </div>
+                <div className="text-grid">
+                  provider:{" "}
+                  <span className="text-bone">{lastResult.provider}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onRetry()}
+                disabled={signedUrl.isPending}
+                className="flex shrink-0 items-center gap-1 rounded-[2px] border border-cyan/40 bg-cyan/10 px-1.5 py-0.5 uppercase tracking-wide text-cyan hover:bg-cyan/20 disabled:opacity-50"
+              >
+                <RefreshCw className="size-3" strokeWidth={1.5} />
+                RETRY
+              </button>
+            </div>
           )}
         </CardContent>
       </Card>
