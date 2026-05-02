@@ -180,18 +180,35 @@ async def _build_org(http: httpx.AsyncClient, lead_id: str) -> dict[str, Any]:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
-async def _generate_pitch(http: httpx.AsyncClient, lead_id: str) -> dict[str, Any]:
-    payload = {"client_id": CLIENT_ID}
-    try:
-        r = await http.post(
-            f"{API_BASE}/lead/{lead_id}/pitch",
-            json=payload,
-            timeout=HTTP_TIMEOUT,
-        )
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"{type(e).__name__}: {e}"}
+async def _generate_pitch(
+    http: httpx.AsyncClient, lead_id: str, *, max_attempts: int = 3
+) -> dict[str, Any]:
+    """Call /pitch and retry up to max_attempts if the route stubs out (used_real=False).
+
+    Sonnet occasionally bubbles up a transient BadRequestError on long pitches;
+    re-running consistently lands a real generation on the second attempt.
+    """
+    last: dict[str, Any] = {}
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = await http.post(
+                f"{API_BASE}/lead/{lead_id}/pitch",
+                json={"client_id": CLIENT_ID},
+                timeout=HTTP_TIMEOUT,
+            )
+            r.raise_for_status()
+            last = r.json()
+        except Exception as e:  # noqa: BLE001
+            last = {"error": f"{type(e).__name__}: {e}"}
+            await asyncio.sleep(1.5)
+            continue
+        if last.get("used_real"):
+            last["attempts"] = attempt
+            return last
+        # Backoff briefly then retry — the stub fallback is what we want to escape.
+        await asyncio.sleep(1.5 * attempt)
+    last["attempts"] = max_attempts
+    return last
 
 
 def _copy_artifact(src: Path, dst: Path) -> Path | None:

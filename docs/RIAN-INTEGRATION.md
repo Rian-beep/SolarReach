@@ -212,6 +212,48 @@ Appends a row to `outreach_events` for cross-system tracking. Use this for
 ### `POST /integration/agent_event`
 **Use this** for *agent trace* events (steps inside Rian's loops). See § 3.
 
+### `POST /rian/run_agent` / `GET /rian/run_agent/{run_id}`
+
+**Outbound** — our API invokes Rian's deepagents stack. Used by the UI's
+`[RUN RIAN AGENT]` button on the Pitch tab. See § 8 for the demo-mode
+fallback contract.
+
+Body (POST):
+```json
+{
+  "agent": "lead_research" | "outreach_drafter",
+  "target_lead_id": "lead_<uuid>" | null,
+  "client_id": "client-greensolar-uk",
+  "params": { "batch_size": 1, "thread_id": "<resume>" }
+}
+```
+
+Returns immediately: `{ run_id, status: "queued" }`. The agent runs in a
+background task and the run document is upserted into `rian_agent_runs`.
+Poll `GET /rian/run_agent/{run_id}` until `status` is terminal (`done`,
+`demo_mode`, `upstream_error`, or `error`).
+
+GET response:
+```json
+{
+  "run_id": "rian_<uuid>",
+  "status": "done|demo_mode|upstream_error|error|queued|running",
+  "agent": "lead_research",
+  "target_lead_id": "lead_abc",
+  "started_at": "ISO-8601",
+  "finished_at": "ISO-8601",
+  "output": {
+    "status": "ok|demo_mode|upstream_error",
+    "agent": "lead_research",
+    "summary": "<final agent message>",
+    "thread_id": "<langgraph thread for resume>",
+    "message_count": 8,
+    "metadata": { "target_lead_id": "lead_abc", ... }
+  },
+  "error": null
+}
+```
+
 ### `POST /realapi/companies-house/search` / `/officers` / `/company`
 Server-side proxy to Companies House. Hides our CH key from the browser and
 audit-logs every call. Use when Rian's agents need CH data without each agent
@@ -403,3 +445,85 @@ Reproduced from CONTRACTS § 7 — non-negotiable:
 4. ALWAYS hash recipient emails with sha256 in `audit_log`.
 5. Both repos write to the SAME `audit_log` collection — coordinate `actor`
    strings (`agent_<name>` namespace per agent) so the dashboard can split.
+
+---
+
+## 8. Outbound: invoking Rian's deepagents stack from our API
+
+Surface: `POST /rian/run_agent` (see § 2). Implementation lives in
+`packages/api/app/services/rian_agent.py` + `packages/api/app/routers/rian.py`.
+
+### Architecture
+
+```
+UI (PitchTab [RUN RIAN AGENT])
+  └─ POST /rian/run_agent          (returns run_id immediately)
+       └─ BackgroundTasks
+            └─ services.rian_agent.run_rian_agent
+                 ├─ try: import lead_agent.run_lead_agent_session
+                 │    └─ asyncio.to_thread(run_lead_agent_session, ...)
+                 │         └─ Rian's pymongo + deepagents + LangGraph loop
+                 └─ except: return demo_mode dataclass
+       └─ persist to rian_agent_runs + audit_log
+  └─ GET /rian/run_agent/{run_id}  (polled every 2s by useRianAgentRun)
+```
+
+### Demo-mode contract
+
+If `lead_agent` cannot be imported in the API venv, the route returns a
+deterministic `demo_mode` payload — never a 5xx. This mirrors the existing
+`voice_provider.RianProjectVoiceProvider` pattern (§ `services/voice_provider.py`).
+
+`output.status` values:
+
+| Value | Meaning |
+|---|---|
+| `ok` | Rian's stack ran, agent finished, summary in `output.summary` |
+| `demo_mode` | `lead_agent` package isn't installed (or unknown agent kind) — UI shows amber badge |
+| `upstream_error` | Stack ran but raised — `summary` carries the exception class + message |
+
+The `RianRunStatus` on the run document (top-level `status`) collapses
+`ok` → `done` so polling logic only watches one terminal state per "happy
+path". `demo_mode` / `upstream_error` / `error` propagate through unchanged
+so the UI can render distinct badges.
+
+### Enabling real-agent mode
+
+The API does **not** depend on Rian's package by default — keeps boot-time
+imports light and CI green without LangGraph + 30 transitive packages.
+
+To enable real runs in your dev venv:
+
+```bash
+# 1. Get Rian's repo on disk somewhere stable
+git clone https://github.com/Rian-beep/solarreach-project1 ~/solarreach-project1
+
+# 2. Install with agent extras into the API's venv
+cd packages/api
+uv pip install --editable "/path/to/solarreach-project1[agent]"
+
+# 3. Restart the API. Verify with:
+curl -sX POST http://localhost:8000/rian/run_agent \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"lead_research","target_lead_id":"lead_abc"}'
+# Then poll /rian/run_agent/{run_id} — status should land at "done"
+# with a non-stub summary, not "demo_mode".
+```
+
+The probe is silent (`logging.INFO`) — check the API log for
+`lead_agent unavailable (...)` if you expect real mode but see demo_mode.
+
+### Why this isn't a hard dependency
+
+- `deepagents` + `langchain-mongodb` + `langgraph-checkpoint-mongodb` total
+  ~30 packages and ~120 MB on disk. Installing them in our API container
+  for the prod path inflates cold-start by 6-8 seconds.
+- Rian's checkpointer needs Mongo Atlas, not mongomock. Forcing it as a
+  dep would break our test suite (which uses `mongomock-motor`).
+- The handshake stays loose: Rian can change his agent surface, ship new
+  agents, or rewrite the lead researcher; our route contract is
+  unaffected as long as `run_lead_agent_session(client_slug=..., batch_size=..., thread_id=...) → {thread_id, final_message, message_count}` holds.
+
+If that signature changes, the failure mode is **`output.status = "upstream_error"`**
+(caught in `_invoke_lead_agent_sync`), not a 500. The UI shows an amber badge
+and we know to update the adapter.
