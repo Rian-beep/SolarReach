@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Header, type AppMode } from "@/components/header/Header";
 import { MapSlot } from "@/components/map3d/MapSlot";
 import { HUDCoords } from "@/components/map3d/HUD-Coords";
@@ -16,7 +17,12 @@ import { CostConfirmProvider } from "@/components/header/CostConfirmModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useLeadStore } from "@/stores/useLeadStore";
 import { useDrawerStore } from "@/stores/useDrawerStore";
-import { useLeadDetail, useLeads } from "@/lib/api";
+import {
+  useFluxOverlay,
+  useLeadDetail,
+  useLeads,
+  usePanels,
+} from "@/lib/api";
 import type { Lead } from "@/lib/types";
 
 const DEFAULT_LAYERS: LayerState = {
@@ -64,6 +70,42 @@ export function App() {
       detailQuery.data ?? leads.find((l) => l._id === selectedLeadId) ?? null,
     [detailQuery.data, leads, selectedLeadId],
   );
+
+  // ── Auto-fetch flux + panels on lead select ─────────────────────────────
+  // Live Solar API renders are <10¢ each (cardinal rule 4 only fires the
+  // cost-confirm modal at ≥£0.10). Skip if the lead doc already carries the
+  // overlay/layout (cached server-side). Track which lead ids we've already
+  // kicked off in this session to avoid re-firing if the lead doc lacks the
+  // field temporarily (e.g. a flux call that returned but hasn't propagated).
+  const flux = useFluxOverlay();
+  const panels = usePanels();
+  const qc = useQueryClient();
+  const fetchedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const id = selectedLead?._id;
+    if (!id) return;
+    if (fetchedRef.current.has(id)) return;
+
+    const needsFlux = !selectedLead.flux_overlay?.url;
+    const needsPanels = !selectedLead.panel_layout?.panel_count;
+    if (!needsFlux && !needsPanels) return;
+
+    fetchedRef.current.add(id);
+
+    const jobs: Promise<unknown>[] = [];
+    if (needsFlux) jobs.push(flux.mutateAsync(id).catch(() => null));
+    if (needsPanels) jobs.push(panels.mutateAsync(id).catch(() => null));
+
+    // Once either lands, refresh the lead detail so the persisted
+    // flux_overlay / panel_layout flow back into the drawer + map.
+    Promise.allSettled(jobs).then(() => {
+      qc.invalidateQueries({ queryKey: ["lead", id] });
+    });
+    // Intentionally don't depend on `flux` / `panels` / `qc` (stable refs from
+    // hook factories) — keying purely off `selectedLead._id` is what we want.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLead?._id, selectedLead?.flux_overlay?.url, selectedLead?.panel_layout?.panel_count]);
 
   const onLeadClick = (id: string) => {
     select(id);

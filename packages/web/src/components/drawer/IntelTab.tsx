@@ -1,4 +1,4 @@
-import { Building2, Network, ShieldCheck, Timer, UserRound } from "lucide-react";
+import { Building2, Network, ShieldCheck, Sun, Timer, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import {
   Card,
@@ -9,11 +9,19 @@ import {
 import { Badge, ScoreBadge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { useBuildOrg, useDirectors } from "@/lib/api";
+import { API_BASE, useBuildOrg, useDirectors } from "@/lib/api";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { computeRoi, formatYears } from "@/lib/financial";
 import { caption, gbp } from "@/lib/utils";
 import type { Lead } from "@/lib/types";
+
+// Flux PNGs are served by FastAPI's StaticFiles mount under /static/flux/<id>.png.
+// Browser <img> tags hit Vite's dev server unless we absolutise to API_BASE.
+function absolutiseStaticUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return `${API_BASE}${url}`;
+}
 
 interface IntelTabProps {
   lead: Lead;
@@ -107,6 +115,60 @@ export function IntelTab({ lead }: IntelTabProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* ── SOLAR RADIANCE (live Google Solar API) ───────────────────────── */}
+      {lead.flux_overlay?.url && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-1.5">
+                <Sun className="size-3.5 text-amber" strokeWidth={1.5} />
+                SOLAR RADIANCE
+              </CardTitle>
+              <span className={caption}>Live · Google Solar API</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <img
+              src={absolutiseStaticUrl(lead.flux_overlay.url)}
+              alt=""
+              className="w-full rounded-[2px] border border-iron"
+            />
+            <div className="mt-1.5 flex justify-between font-mono text-[10px] uppercase tracking-widest text-grid">
+              <span>{lead.flux_overlay.vmin?.toFixed(0)} kWh/m²/yr</span>
+              <span>{lead.flux_overlay.vmax?.toFixed(0)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── PANEL LAYOUT (live Solar API findClosest, ray-cast clipped) ──── */}
+      {lead.panel_layout?.panel_count ? (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>PANEL LAYOUT</CardTitle>
+              <span className={caption}>Live · ray-cast clipped</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[2px] border border-iron bg-iron">
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>PANEL COUNT</div>
+                <div className="font-mono text-sm text-bone tabular-nums">
+                  {lead.panel_layout.panel_count}
+                </div>
+              </div>
+              <div className="bg-app-surface px-2 py-1.5">
+                <div className={caption}>ANNUAL kWh</div>
+                <div className="font-mono text-sm text-bone tabular-nums">
+                  {lead.panel_layout.annual_kwh.toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* ── COMPOSITE SCORE ──────────────────────────────────────────────── */}
       <Card>
