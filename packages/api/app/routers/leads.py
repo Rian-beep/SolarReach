@@ -547,8 +547,17 @@ async def pitch(
                 emails[k] = str(v)
 
         # Render PPTX + PDF
-        brand = (client_doc.get("branding") or {}) | {"primary": "#1FB6FF", "accent": "#FFB020"}
-        pptx_path = render_pptx(deck_json, brand=brand, lead_id=pitch_id, out_dir="/tmp/decks")
+        # client_doc.branding wins over the hardcoded fallback so each client's
+        # palette actually shows through (otherwise every deck was blue/orange).
+        brand = {"primary": "#1FB6FF", "accent": "#FFB020"} | (client_doc.get("branding") or {})
+        pptx_path = render_pptx(
+            deck_json,
+            brand=brand,
+            lead_id=pitch_id,
+            out_dir="/tmp/decks",
+            lead=lead,
+            client_doc=client_doc,
+        )
         pptx_url = f"/static/pitches/{pptx_path.name}"
         try:
             pdf_path = pptx_to_pdf(pptx_path, out_dir="/tmp/decks")
