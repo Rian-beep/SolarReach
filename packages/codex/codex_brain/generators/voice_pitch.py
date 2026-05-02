@@ -16,7 +16,6 @@ from typing import Any
 from ..anthropic_client import AnthropicClient
 from ..prompts import load_prompt
 
-
 SONNET_MODEL = "claude-sonnet-4-6"
 
 # TTS pacing target — used to estimate seconds when the model omits the field
@@ -47,7 +46,7 @@ def _format_currency_for_tts(amount: int | float | None) -> str:
     if amount is None:
         return "the projected saving"
     try:
-        amt = int(round(float(amount)))
+        amt = round(float(amount))
     except (TypeError, ValueError):
         return "the projected saving"
     return f"{amt:,} pounds"
@@ -177,7 +176,7 @@ async def generate_voice_pitch(
             est_seconds = 0
         if est_seconds <= 0:
             est_seconds = _seconds_from_words(_word_count(script))
-        cost_cents = int(round(result.cost_cents))
+        cost_cents = round(result.cost_cents)
         return VoicePitchResult(
             script=script,
             est_seconds=est_seconds,
@@ -195,7 +194,7 @@ async def generate_voice_pitch(
 
 
 __all__ = [
+    "WORDS_PER_MINUTE",
     "VoicePitchResult",
     "generate_voice_pitch",
-    "WORDS_PER_MINUTE",
 ]

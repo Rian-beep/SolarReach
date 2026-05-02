@@ -225,7 +225,7 @@ async def voice_pitch_audio(
         script_cost_cents = pitch.cost_cents
         duration_sec = pitch.est_seconds
         rationale = pitch.rationale
-    except Exception as e:  # noqa: BLE001 — fall back to deterministic script
+    except Exception as e:
         log.warning("voice_pitch script generation fell back: %s", e)
         from codex_brain.generators.voice_pitch import (
             _fallback_script,
