@@ -43,7 +43,8 @@ while IFS= read -r file; do
     continue
   fi
   # Diff added lines only (lines starting with + but not the +++ header).
-  added=$(git diff --cached -U0 -- "$file" | grep -E '^\+' | grep -vE '^\+\+\+')
+  # Use `|| true` so a deletion-only diff (no `+` lines) doesn't trip set -e.
+  added=$(git diff --cached -U0 -- "$file" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
 
   for entry in "${PATTERNS[@]}"; do
     label="${entry%%	*}"
