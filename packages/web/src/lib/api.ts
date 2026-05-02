@@ -15,10 +15,14 @@ import type {
   PanelLayout,
   PitchResponse,
   PricingTier,
+  RianAgentKind,
+  RianRunDetail,
+  RianRunResponse,
   ScanResponse,
   Spend,
   SwarmJob,
   SwarmRunResponse,
+  VoicePitchAudio,
   VoiceSignedUrl,
 } from "./types";
 
@@ -234,6 +238,32 @@ export function useVoiceSignedUrl(): UseMutationResult<
   });
 }
 
+export interface VoicePitchAudioArgs {
+  leadId: string;
+  clientId?: string;
+}
+
+export function useVoicePitchAudio(): UseMutationResult<
+  VoicePitchAudio,
+  Error,
+  VoicePitchAudioArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, clientId }) =>
+      http<VoicePitchAudio>("/voice/pitch_audio", {
+        method: "POST",
+        body: JSON.stringify({
+          lead_id: leadId,
+          client_id: clientId ?? "client-greensolar-uk",
+        }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["spend"] });
+    },
+  });
+}
+
 // ─── Calculator + Inbound ──────────────────────────────────────────────────
 
 export function useCalculator(): UseMutationResult<
@@ -342,6 +372,62 @@ export function useSwarmJob(
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === "done" || status === "error" ? false : 2_000;
+    },
+    refetchIntervalInBackground: false,
+    staleTime: 0,
+  });
+}
+
+// ─── Rian agent (deepagents) ───────────────────────────────────────────────
+
+export interface RunRianAgentArgs {
+  agent: RianAgentKind;
+  target_lead_id?: string | null;
+  client_id?: string;
+  params?: Record<string, unknown>;
+}
+
+export function useRunRianAgent(): UseMutationResult<
+  RianRunResponse,
+  Error,
+  RunRianAgentArgs
+> {
+  return useMutation({
+    mutationFn: (args) =>
+      http<RianRunResponse>("/rian/run_agent", {
+        method: "POST",
+        body: JSON.stringify({
+          agent: args.agent,
+          target_lead_id: args.target_lead_id ?? null,
+          client_id: args.client_id ?? "client-greensolar-uk",
+          params: args.params ?? {},
+        }),
+      }),
+  });
+}
+
+/**
+ * Poll a Rian agent run. Mirrors useSwarmJob — refetches while the run is
+ * queued/running, stops once a terminal status lands. Note that "demo_mode"
+ * and "upstream_error" are TERMINAL states (the run finished, just not in
+ * "ok" mode), so we treat them like "done" for polling purposes.
+ */
+export function useRianAgentRun(
+  runId: string | null,
+): UseQueryResult<RianRunDetail, Error> {
+  return useQuery({
+    queryKey: ["rian-run", runId],
+    queryFn: () => http<RianRunDetail>(`/rian/run_agent/${runId}`),
+    enabled: !!runId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      const terminal: ReadonlyArray<string> = [
+        "done",
+        "demo_mode",
+        "upstream_error",
+        "error",
+      ];
+      return status && terminal.includes(status) ? false : 2_000;
     },
     refetchIntervalInBackground: false,
     staleTime: 0,

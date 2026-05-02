@@ -168,6 +168,17 @@ export interface VoiceSignedUrl {
   provider: string;
 }
 
+export type VoicePitchStatus = "ok" | "demo_mode" | "upstream_error";
+
+export interface VoicePitchAudio {
+  audio_url: string | null;
+  script: string;
+  duration_sec: number;
+  cost_cents: number;
+  status: VoicePitchStatus;
+  message: string;
+}
+
 export interface CalculatorResponse {
   capex_gbp: number;
   annual_saving_gbp: number;
@@ -218,4 +229,46 @@ export interface SwarmJob {
   result: string | null;
   error: string | null;
   artifacts: SwarmArtifacts | null;
+}
+
+// ─── Rian agent (deepagents/LangGraph integration) ────────────────────────
+
+export type RianAgentKind = "lead_research" | "outreach_drafter";
+
+export type RianAgentStatus = "ok" | "demo_mode" | "upstream_error";
+
+// "queued"/"running" before the agent finishes; "done" only when status="ok".
+// Failures resolve to "demo_mode" / "upstream_error" / "error" so the UI can
+// distinguish "Rian's stack isn't installed" from "the stack ran and threw".
+export type RianRunStatus =
+  | "queued"
+  | "running"
+  | "done"
+  | "demo_mode"
+  | "upstream_error"
+  | "error";
+
+export interface RianAgentOutput {
+  status: RianAgentStatus;
+  agent: string;
+  summary: string;
+  thread_id: string | null;
+  message_count: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface RianRunResponse {
+  run_id: string;
+  status: RianRunStatus;
+}
+
+export interface RianRunDetail {
+  run_id: string;
+  status: RianRunStatus;
+  agent: string;
+  target_lead_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  output: RianAgentOutput | null;
+  error: string | null;
 }

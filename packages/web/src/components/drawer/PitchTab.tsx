@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Bot,
+  BrainCircuit,
   Download,
   FileText,
   Mail,
@@ -21,6 +22,8 @@ import { Badge } from "@/components/ui/Badge";
 import {
   API_BASE,
   useGeneratePitch,
+  useRianAgentRun,
+  useRunRianAgent,
   useSwarmJob,
   useSwarmRun,
 } from "@/lib/api";
@@ -35,6 +38,7 @@ interface PitchTabProps {
 
 const PITCH_COST_CENTS = 10;
 const SWARM_COST_CENTS = 30;
+const RIAN_AGENT_COST_CENTS = 20;
 
 export function PitchTab({
   lead,
@@ -42,10 +46,14 @@ export function PitchTab({
 }: PitchTabProps) {
   const pitch = useGeneratePitch();
   const swarmRun = useSwarmRun();
+  const rianRun = useRunRianAgent();
   const { confirm } = useCostConfirm();
 
   const [swarmJobId, setSwarmJobId] = useState<string | null>(null);
   const swarmJob = useSwarmJob(swarmJobId);
+
+  const [rianRunId, setRianRunId] = useState<string | null>(null);
+  const rianRunDetail = useRianAgentRun(rianRunId);
 
   const onGenerate = async () => {
     const ok = await confirm(
@@ -79,12 +87,44 @@ export function PitchTab({
     }
   };
 
+  const onRunRianAgent = async () => {
+    const ok = await confirm(
+      RIAN_AGENT_COST_CENTS,
+      "Run Rian agent (deepagents lead researcher on LangGraph)",
+    );
+    if (!ok) return;
+    try {
+      const res = await rianRun.mutateAsync({
+        agent: "lead_research",
+        target_lead_id: lead._id,
+        client_id: clientId,
+        params: { batch_size: 1 },
+      });
+      setRianRunId(res.run_id);
+      toast.success(`Rian agent dispatched · ${res.run_id.slice(0, 12)}…`);
+    } catch (err) {
+      toast.error(`Rian agent failed: ${(err as Error).message}`);
+    }
+  };
+
   const result = pitch.data;
   const job = swarmJob.data;
   const swarmRunning =
     swarmRun.isPending || job?.status === "queued" || job?.status === "running";
   const swarmDone = job?.status === "done";
   const swarmError = job?.status === "error";
+
+  const rian = rianRunDetail.data;
+  // Treat "queued"/"running" as in-flight; everything else (done/demo_mode/
+  // upstream_error/error) is a terminal state we should render.
+  const rianRunning =
+    rianRun.isPending ||
+    rian?.status === "queued" ||
+    rian?.status === "running";
+  const rianDone = rian?.status === "done";
+  const rianDemo = rian?.status === "demo_mode";
+  const rianFailed =
+    rian?.status === "upstream_error" || rian?.status === "error";
 
   return (
     <div className="space-y-3">
@@ -121,6 +161,17 @@ export function PitchTab({
               ? `${(job?.status ?? "QUEUED").toUpperCase()}…`
               : `[BUILD OUTREACH PACKAGE — SWARM] · ~30s · ${gbp(SWARM_COST_CENTS, { cents: true })}`}
           </Button>
+          <Button
+            variant="ghost"
+            onClick={onRunRianAgent}
+            disabled={rianRunning}
+            className="w-full"
+          >
+            <BrainCircuit className="size-3.5" strokeWidth={1.5} />
+            {rianRunning
+              ? `${(rian?.status ?? "QUEUED").toUpperCase()}…`
+              : `[RUN RIAN AGENT — DEEPAGENTS] · ${gbp(RIAN_AGENT_COST_CENTS, { cents: true })}`}
+          </Button>
         </CardContent>
       </Card>
 
@@ -134,6 +185,65 @@ export function PitchTab({
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="aspect-video" />
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Rian agent run */}
+      {rianRunId && (rianRunning || rianDone || rianDemo || rianFailed) && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-1.5">
+                <BrainCircuit
+                  className="size-3.5 text-cyan"
+                  strokeWidth={1.5}
+                />
+                RIAN AGENT
+              </CardTitle>
+              <Badge
+                variant={
+                  rianFailed ? "amber" : rianDemo ? "amber" : "cyan"
+                }
+              >
+                {(rian?.status ?? "queued").toUpperCase()}
+              </Badge>
+            </div>
+            <CardDescription className="font-mono text-[10px]">
+              {rianRunId}
+              {rian?.output?.thread_id ? ` · ${rian.output.thread_id}` : ""}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {rianRunning && (
+              <div className="grid grid-cols-3 gap-1.5">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="aspect-video" />
+                ))}
+              </div>
+            )}
+
+            {(rianDone || rianDemo || rianFailed) && rian?.output && (
+              <div className="rounded-[2px] border border-iron bg-app-elev-1 p-2 space-y-1">
+                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-wide">
+                  <span className="text-cyan">
+                    {rian.output.agent || "agent"}
+                  </span>
+                  <span className="text-dim tabular-nums">
+                    {rian.output.message_count} msg
+                  </span>
+                </div>
+                <p className="text-xs text-bone whitespace-pre-line leading-relaxed">
+                  {rian.output.summary}
+                </p>
+              </div>
+            )}
+
+            {rian?.error && (
+              <p className="text-xs text-amber whitespace-pre-line">
+                {rian.error}
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

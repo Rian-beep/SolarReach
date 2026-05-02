@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Radio, RefreshCw } from "lucide-react";
+import {
+  Headphones,
+  Mic,
+  MicOff,
+  Radio,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import {
@@ -10,20 +17,31 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { useVoiceSignedUrl } from "@/lib/api";
+import { API_BASE, useVoicePitchAudio, useVoiceSignedUrl } from "@/lib/api";
 import { useVoiceStore } from "@/stores/useVoiceStore";
 import { useCostConfirm } from "@/components/header/CostConfirmModal";
 import { startConversation } from "@/lib/elevenlabs";
-import type { Lead, TranscriptChunk, VoiceSignedUrl } from "@/lib/types";
+import type {
+  Lead,
+  TranscriptChunk,
+  VoicePitchAudio,
+  VoiceSignedUrl,
+} from "@/lib/types";
 
 interface VoiceTabProps {
   lead: Lead;
+  clientId?: string;
 }
 
 const VOICE_COST_CENTS = 15;
+const PITCH_AUDIO_COST_CENTS = 25;
 
-export function VoiceTab({ lead }: VoiceTabProps) {
+export function VoiceTab({
+  lead,
+  clientId = "client-greensolar-uk",
+}: VoiceTabProps) {
   const signedUrl = useVoiceSignedUrl();
+  const pitchAudio = useVoicePitchAudio();
   const status = useVoiceStore((s) => s.status);
   const transcript = useVoiceStore((s) => s.transcript);
   const start = useVoiceStore((s) => s.start);
@@ -35,6 +53,7 @@ export function VoiceTab({ lead }: VoiceTabProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   // Last server response — drives the demo-mode pill.
   const [lastResult, setLastResult] = useState<VoiceSignedUrl | null>(null);
+  const [pitchResult, setPitchResult] = useState<VoicePitchAudio | null>(null);
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -127,6 +146,29 @@ export function VoiceTab({ lead }: VoiceTabProps) {
     await fetchSignedUrl();
   };
 
+  const onGeneratePitchAudio = async () => {
+    const ok = await confirm(
+      PITCH_AUDIO_COST_CENTS,
+      "AI voice pitch (Sonnet 4.6 → ElevenLabs TTS)",
+    );
+    if (!ok) return;
+    try {
+      const res = await pitchAudio.mutateAsync({
+        leadId: lead._id,
+        clientId,
+      });
+      setPitchResult(res);
+      if (res.status === "ok") {
+        toast.success("Voice pitch ready");
+      }
+      // demo_mode / upstream_error: pill explains it, no toast.
+    } catch (err) {
+      const msg = (err as Error).message;
+      toast.error(`Voice pitch failed: ${msg}`);
+      setPitchResult(null);
+    }
+  };
+
   const isLive =
     status === "connected" ||
     status === "speaking" ||
@@ -134,8 +176,105 @@ export function VoiceTab({ lead }: VoiceTabProps) {
 
   const pendingStatus = lastResult && lastResult.status !== "ok";
 
+  // Audio src must be absolute when API_BASE is set; otherwise the relative
+  // /static/swarm/tts/* URL resolves through the same Vite proxy used for
+  // all other API calls.
+  const audioSrc = pitchResult?.audio_url
+    ? `${API_BASE}${pitchResult.audio_url}`
+    : null;
+
   return (
     <div className="space-y-3">
+      {/* AI VOICE PITCH — one-shot Sonnet → ElevenLabs TTS playback */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-1.5">
+              <Sparkles className="size-3.5 text-cyan" strokeWidth={1.5} />
+              AI VOICE PITCH
+            </CardTitle>
+            {pitchResult?.status === "ok" && (
+              <Badge variant="cyan" className="gap-1.5">
+                <span className="size-1.5 rounded-full bg-cyan animate-live-dot" />
+                READY
+              </Badge>
+            )}
+            {pitchResult && pitchResult.status !== "ok" && (
+              <Badge variant="cyan" className="gap-1.5">
+                <span className="size-1.5 rounded-full bg-cyan animate-live-dot" />
+                {pitchResult.status === "demo_mode"
+                  ? "DEMO MODE"
+                  : "UPSTREAM ERROR"}
+              </Badge>
+            )}
+          </div>
+          <CardDescription>
+            Sonnet 4.6 → ElevenLabs TTS · ~90s read · payback + biggest tax
+            break + bold close.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Button
+            onClick={onGeneratePitchAudio}
+            disabled={pitchAudio.isPending}
+            className="w-full"
+          >
+            <Headphones className="size-3.5" strokeWidth={1.5} />
+            {pitchAudio.isPending
+              ? "GENERATING…"
+              : "[GENERATE VOICE PITCH]"}
+          </Button>
+
+          {pitchResult && pitchResult.status === "ok" && audioSrc && (
+            <div className="space-y-2">
+              <audio
+                controls
+                src={audioSrc}
+                className="w-full h-8 rounded-[2px] bg-app-elev-1"
+              >
+                <track kind="captions" />
+              </audio>
+              <div className="flex items-center justify-between font-mono text-xs text-grid">
+                <span className="uppercase tracking-wide">
+                  est{" "}
+                  <span className="text-bone tabular-nums">
+                    {pitchResult.duration_sec}s
+                  </span>
+                </span>
+                <span className="uppercase tracking-wide">
+                  cost{" "}
+                  <span className="text-amber tabular-nums">
+                    {(pitchResult.cost_cents / 100).toFixed(2)}p
+                  </span>
+                </span>
+              </div>
+              <div className="rounded-[2px] border border-iron bg-app-void p-2 max-h-40 overflow-y-auto font-mono text-xs leading-relaxed text-bone whitespace-pre-wrap">
+                {pitchResult.script}
+              </div>
+            </div>
+          )}
+
+          {pitchResult && pitchResult.status !== "ok" && (
+            <div className="rounded-[2px] border border-cyan/40 bg-cyan/5 p-2 font-mono text-xs space-y-1">
+              <div className="text-cyan uppercase tracking-wide">
+                {pitchResult.status === "demo_mode"
+                  ? "TTS in demo mode"
+                  : "TTS upstream error"}
+              </div>
+              <div className="text-mute leading-relaxed">
+                {pitchResult.message ||
+                  "Audio synthesis skipped — script still generated."}
+              </div>
+              {pitchResult.script && (
+                <div className="mt-1 rounded-[2px] border border-iron bg-app-void p-2 max-h-40 overflow-y-auto text-bone whitespace-pre-wrap">
+                  {pitchResult.script}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
