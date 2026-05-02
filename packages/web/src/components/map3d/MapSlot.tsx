@@ -33,6 +33,8 @@ declare global {
   interface Window {
     __sr_maps_ready?: () => void;
     __sr_maps_loading?: boolean;
+    __sr_maps_auth_fail?: () => void;
+    gm_authFailure?: () => void;
     google?: { maps?: unknown };
   }
 }
@@ -256,6 +258,20 @@ export function MapSlot({
       setLoadErr("VITE_GOOGLE_MAPS_API_KEY missing in .env.local");
       return;
     }
+    // Google's auth failure callback — fires when the API key is invalid,
+    // restricted, or the API is not enabled. Caught BEFORE the SDK throws
+    // its generic "didn't load correctly" UI overlay.
+    window.gm_authFailure = () => {
+      const last4 = GOOGLE_MAPS_API_KEY.slice(-4);
+      setLoadErr(
+        `gm_authFailure — Google rejected the key (...${last4}). Check GCP console:\n` +
+          `  • Map Tiles API: enabled?\n` +
+          `  • Maps JavaScript API: enabled?\n` +
+          `  • Billing: enabled on the project?\n` +
+          `  • Application restrictions: set to None (NOT HTTP referrer)?\n` +
+          `  • Photorealistic 3D Tiles: project on the allowlist?`,
+      );
+    };
     loadMapsSdk(GOOGLE_MAPS_API_KEY)
       .then(() => setSdkReady(true))
       .catch((e) => setLoadErr((e as Error).message));
