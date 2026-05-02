@@ -13,7 +13,7 @@
  *
  * Marker styling (alpha SDK has no shadow-DOM ::part hooks yet — graceful
  * degrade): we add `data-score-band` (low/mid/high) + `data-selected` to each
- * `<gmp-marker-3d-interactive-element>`. CSS in index.css targets these
+ * `<gmp-marker-3d-interactive>`. CSS in index.css targets these
  * attribute selectors and styles the marker host element where the SDK lets us.
  *
  * Cardinal rules respected:
@@ -55,7 +55,7 @@ declare module "react" {
         roll?: string | number;
         mode?: string;
       };
-      "gmp-marker-3d-interactive-element": React.DetailedHTMLProps<
+      "gmp-marker-3d-interactive": React.DetailedHTMLProps<
         React.HTMLAttributes<HTMLElement>,
         HTMLElement
       > & {
@@ -292,7 +292,7 @@ export function MapSlot({
   //
   // The alpha SDK fires `gmp-click` on the host map element BUT the
   // `event.target` is often the inner shadow-DOM child of the marker
-  // (the SDK's pin sprite element), NOT the `<gmp-marker-3d-interactive-element>`
+  // (the SDK's pin sprite element), NOT the `<gmp-marker-3d-interactive>`
   // host that carries `data-lead-id`. Walking `composedPath()` retargets
   // the click to the first ancestor — across shadow boundaries — that
   // actually carries the lead id. `closest('[data-lead-id]')` would not
@@ -590,7 +590,7 @@ export function MapSlot({
               owner.length > 22 ? owner.slice(0, 21) + "…" : owner;
             const labelText = `${score} · ${ownerShort}`;
             return (
-              <gmp-marker-3d-interactive-element
+              <gmp-marker-3d-interactive
                 key={lead._id}
                 ref={(el) => {
                   if (!el) return;
@@ -622,7 +622,7 @@ export function MapSlot({
 
                   if (window.customElements?.whenDefined) {
                     window.customElements
-                      .whenDefined("gmp-marker-3d-interactive-element")
+                      .whenDefined("gmp-marker-3d-interactive")
                       .then(applyProps)
                       .catch(() => applyProps());
                   } else {
@@ -757,7 +757,7 @@ export function MapSlot({
             (postcodes.io geocode), independent of how many leads match.
             Falls back to leads-centroid if the geocode failed. */}
         {(searchTarget || centroid) && (
-          <gmp-marker-3d-interactive-element
+          <gmp-marker-3d-interactive
             key="search-target"
             ref={(el) => {
               if (!el) return;
@@ -777,7 +777,7 @@ export function MapSlot({
               };
               if (window.customElements?.whenDefined) {
                 window.customElements
-                  .whenDefined("gmp-marker-3d-interactive-element")
+                  .whenDefined("gmp-marker-3d-interactive")
                   .then(applyProps)
                   .catch(() => applyProps());
               } else {
