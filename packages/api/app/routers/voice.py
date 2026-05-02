@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from app.config import Settings
 from app.deps import get_app_settings, get_db
 from app.services.audit import log_audit
+from app.services.s3_storage import get_s3_storage
 from app.services.voice_provider import (
     SignedUrlResult,
     ai_disclosure_ok,
@@ -131,6 +132,10 @@ PitchAudioStatus = Literal["ok", "demo_mode", "upstream_error"]
 
 class PitchAudioResponse(BaseModel):
     audio_url: str | None
+    # Presigned S3 URL (1h TTL) when AWS_* env is set and upload succeeded.
+    # Frontend prefers this over `audio_url` because it's CDN-friendly and
+    # not tied to the API host's filesystem.
+    audio_s3_url: str | None = None
     script: str
     duration_sec: int
     cost_cents: int
@@ -300,6 +305,29 @@ async def voice_pitch_audio(
         )
 
     audio_url = f"/static/swarm/tts/{out_path.name}"
+
+    # Upload the mp3 to S3 alongside the local copy. ts in the key (rather
+    # than fixed filename) lets us keep historical takes for debugging if
+    # the operator wants — bucket lifecycle moves them to Glacier after 30d.
+    audio_s3_url: str | None = None
+    try:
+        from datetime import datetime, timezone
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        s3 = get_s3_storage()
+        mp3_bytes = out_path.read_bytes()
+        s3_key = f"voice/{body.lead_id}/{ts}.mp3"
+        res = await s3.put_object(
+            s3_key,
+            mp3_bytes,
+            content_type="audio/mpeg",
+            local_path=out_path,
+        )
+        if res.uploaded:
+            audio_s3_url = res.url
+    except Exception as e:  # noqa: BLE001 — never break the route on S3 failure
+        log.warning("s3 voice upload failed (non-fatal): %s", e)
+
     await log_audit(
         db,
         action="voice.pitch_audio",
@@ -312,11 +340,13 @@ async def voice_pitch_audio(
             "script_chars": len(script_text),
             "duration_sec": duration_sec,
             "audio_url": audio_url,
+            "audio_s3_url": audio_s3_url,
             "rationale": rationale,
         },
     )
     return PitchAudioResponse(
         audio_url=audio_url,
+        audio_s3_url=audio_s3_url,
         script=script_text,
         duration_sec=duration_sec,
         cost_cents=total_cost_cents,

@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -49,6 +50,18 @@ CODENODE_LEAD_ID = "lead_codenode_demo"
 CODENODE_SLUG = "codenode"
 EC2M_TOP_N = 12
 HTTP_TIMEOUT = 120.0  # /pitch through Sonnet can take a while
+
+# Synthesised-panel fallback knobs. The CodeNode roof can be too small / too
+# awkward for Solar API's `findClosest` to return a useful layout — when that
+# happens we lay a 1.0m × 1.7m grid inside lead.rooftop_polygon ourselves so
+# the demo never shows an empty roof.
+PANEL_W_M = 1.0      # panel width  (east–west)
+PANEL_H_M = 1.7      # panel height (north–south, sensor face)
+PANEL_GAP_M = 0.15   # row/column gap so panels don't visibly tile-fight
+PANEL_TILT_DEG = 60.0
+PANEL_AZIMUTH_DEG = 180.0  # south-facing
+PANEL_KWH_YR = 340.0       # mid-band ~340 W panel × ~1000 hr equivalent
+SYNTH_MIN_PANELS = 6       # below this we treat the layout as "missing"
 
 # ElevenLabs default "George" voice — same one the demo TTS smoke uses.
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")

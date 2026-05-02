@@ -31,6 +31,9 @@ dependencies = [
     "pillow>=10.4",
     "numpy>=1.26",
     "solarreach-swarm",
+    # AWS S3 storage for generated artifacts (services/s3_storage.py).
+    # Optional at runtime: missing AWS_* env vars → graceful local-only mode.
+    "aioboto3>=13.2",
 ]
 
 [project.optional-dependencies]

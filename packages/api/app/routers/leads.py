@@ -25,6 +25,7 @@ from app.services.project1_link import (
     fetch_project1_leads,
     push_outreach_event,
 )
+from app.services.s3_storage import get_s3_storage
 
 router = APIRouter()
 log = logging.getLogger("solarreach.api.leads")
@@ -515,6 +516,8 @@ async def pitch(
     cost_cents_total = 0
     pptx_url: str | None = None
     pdf_url: str | None = None
+    pptx_s3_url: str | None = None
+    pdf_s3_url: str | None = None
     used_real = False
     err_msg: str | None = None
 
@@ -559,11 +562,52 @@ async def pitch(
             client_doc=client_doc,
         )
         pptx_url = f"/static/pitches/{pptx_path.name}"
+        pdf_path = None
         try:
             pdf_path = pptx_to_pdf(pptx_path, out_dir="/tmp/decks")
             pdf_url = f"/static/pitches/{pdf_path.name}"
         except Exception as e:  # libreoffice may be missing locally
             log.warning("pdf conversion skipped: %s", e)
+
+        # Upload to S3 if configured (graceful local fallback otherwise).
+        # Keys are scoped per-lead so a re-run for the same lead replaces
+        # rather than accumulates. The presigned URL TTL is 1 hour — the
+        # frontend re-fetches the lead doc when needed and we re-sign on
+        # demand via /lead/<id>/pitch.
+        try:
+            s3 = get_s3_storage()
+            pptx_bytes = pptx_path.read_bytes()
+            pptx_key = f"pitches/{lead_id}/{pitch_id}.pptx"
+            pptx_res = await s3.put_object(
+                pptx_key,
+                pptx_bytes,
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "presentationml.presentation"
+                ),
+                local_path=pptx_path,
+            )
+            if pptx_res.uploaded:
+                pptx_s3_url = pptx_res.url
+            else:
+                pptx_s3_url = None
+
+            pdf_s3_url = None
+            if pdf_path is not None:
+                pdf_bytes = pdf_path.read_bytes()
+                pdf_key = f"pitches/{lead_id}/{pitch_id}.pdf"
+                pdf_res = await s3.put_object(
+                    pdf_key,
+                    pdf_bytes,
+                    content_type="application/pdf",
+                    local_path=pdf_path,
+                )
+                if pdf_res.uploaded:
+                    pdf_s3_url = pdf_res.url
+        except Exception as e:  # noqa: BLE001 — S3 must never block the pitch
+            log.warning("s3 pitch upload failed (non-fatal): %s", e)
+            pptx_s3_url = None
+            pdf_s3_url = None
         used_real = True
     except Exception as e:  # noqa: BLE001
         err_msg = str(e)
@@ -603,6 +647,12 @@ async def pitch(
     payload = {
         "pptx_url": pptx_url,
         "pdf_url": pdf_url,
+        # S3 URLs are presigned (1h TTL) when the upload succeeded, otherwise
+        # None. The frontend prefers these over local /static/pitches URLs
+        # because they survive a backend restart and aren't tied to the
+        # demo machine's filesystem.
+        "pptx_s3_url": pptx_s3_url,
+        "pdf_s3_url": pdf_s3_url,
         "emails": emails,
         "deck_json": deck_json,
         "cost_cents": cost_cents_total,
