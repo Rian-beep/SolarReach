@@ -22,9 +22,15 @@ import type {
   VoiceSignedUrl,
 } from "./types";
 
+// In dev, leave this empty so requests are relative and go through the Vite
+// proxy (see packages/web/vite.config.ts). The proxy handles transient API
+// restarts cleanly (returns 502) instead of producing bare "Failed to fetch"
+// network errors. In prod the bundle runs on the same origin as the API, so
+// relative paths still work. Override with VITE_API_BASE only if the web is
+// served from a different origin than the API (e.g. preview deploys).
 export const API_BASE: string =
   (import.meta as { env?: Record<string, string | undefined> }).env
-    ?.VITE_API_BASE ?? "http://localhost:8000";
+    ?.VITE_API_BASE ?? "";
 
 class ApiError extends Error {
   status: number;
@@ -40,13 +46,26 @@ async function http<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (err) {
+    // fetch() rejects with TypeError on network failure (DNS, refused
+    // connection, CORS preflight failure). Surface a message the user can act
+    // on instead of bare "Failed to fetch".
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new ApiError(
+      0,
+      `Cannot reach API at ${API_BASE || window.location.origin}${path} — is the server running? (${cause})`,
+      null,
+    );
+  }
   if (!res.ok) {
     let body: unknown = null;
     try {
