@@ -68,7 +68,8 @@ echo "$SCAN_RESP" | head -c 200; echo
 SCAN_ID=$(echo "$SCAN_RESP" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('scan_id',''))" 2>/dev/null || echo "")
 if [[ -n "$SCAN_ID" ]]; then
   g "PASS POST /scan -> scan_id=$SCAN_ID"; PASS=$((PASS+1))
-  # SSE: stream 5s of events to a file then count "event:" lines.
+  # SSE: short warmup so subscriber attaches before producer drains.
+  sleep 1
   curl -sN --max-time 5 "$API/scan/$SCAN_ID/stream" >/tmp/sr_sse.txt 2>/dev/null || true
   SSE_BYTES=$(wc -c </tmp/sr_sse.txt | tr -d ' ')
   EVT_COUNT=$(grep -c "^event:" /tmp/sr_sse.txt 2>/dev/null || echo 0)
