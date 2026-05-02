@@ -127,25 +127,60 @@ class BuildOrgResponse(BaseModel):
 async def build_org(
     lead_id: str,
     db: AsyncIOMotorDatabase = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
 ) -> BuildOrgResponse:
+    """Real Opus 4.7 decision-maker inference; soft-fails to stub on error."""
     lead = await db.leads.find_one({"_id": lead_id})
     if not lead:
         raise HTTPException(404, "lead not found")
-    # A2 STUB — TODO(A4): delegate to codex via celery.
+
+    # Pull directors for this lead's company (if any)
+    directors: list[dict[str, Any]] = []
+    company_id = (lead.get("owner") or {}).get("company_id")
+    if company_id:
+        async for d in db.directors.find({"company_id": company_id}):
+            directors.append(d)
+
+    decision_maker: dict[str, Any]
+    cost_cents = 0
+    used_real = False
+    err_msg: str | None = None
+
+    try:
+        from codex_brain.anthropic_client import AnthropicClient
+        from codex_brain.generators.org_chart import infer_decision_maker
+
+        if not settings.anthropic_api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY missing")
+
+        client = AnthropicClient(api_key=settings.anthropic_api_key)
+        result = await infer_decision_maker(directors, lead, client)
+        decision_maker = {
+            "name": result.name,
+            "role": result.role,
+            "confidence": result.confidence,
+            "rationale": result.rationale,
+        }
+        # Opus is the priciest path; fixed estimate when DecisionMaker doesn't expose cost.
+        cost_cents = int(getattr(result, "cost_cents", 5))
+        used_real = True
+    except Exception as e:  # noqa: BLE001
+        err_msg = str(e)
+        log.warning("real build_org failed, falling back to stub: %s", e)
+        decision_maker = {
+            "name": "Sarah Patel",
+            "role": "CFO",
+            "confidence": 0.78,
+            "rationale": "Stub fallback — real Opus inference unavailable.",
+        }
+
     await log_audit(
         db,
         action="lead.build_org",
         lead_id=lead_id,
-        cost_cents=0,
-        metadata={"stub": True},
+        cost_cents=cost_cents,
+        metadata={"stub": not used_real, "error": err_msg, "directors_count": len(directors)},
     )
-    log.info("# A2 STUB build_org lead=%s", lead_id)
-    decision_maker = {
-        "name": "Sarah Patel",
-        "role": "CFO",
-        "confidence": 0.78,
-        "rationale": "Stubbed — codex pipeline (A4) will replace.",
-    }
     await db.leads.update_one(
         {"_id": lead_id}, {"$set": {"decision_maker": decision_maker}}
     )
