@@ -17,6 +17,7 @@ import { CostConfirmProvider } from "@/components/header/CostConfirmModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useLeadStore } from "@/stores/useLeadStore";
 import { useDrawerStore } from "@/stores/useDrawerStore";
+import { useSearchStore } from "@/stores/useSearchStore";
 import {
   useFluxOverlay,
   useLeadDetail,
@@ -24,6 +25,19 @@ import {
   usePanels,
 } from "@/lib/api";
 import type { Lead } from "@/lib/types";
+
+// Auto-scan default — boot the camera straight to central London so the demo
+// lands on visible pins without the user typing a postcode. EC1Y 8AF =
+// Barbican / Old Street tech corridor (placeholder of the input field too).
+const DEFAULT_SCAN = {
+  postcode: "EC1Y 8AF",
+  lat: 51.5256,
+  lng: -0.0876,
+} as const;
+// Camera flight from UK overview → London is ~1500ms; nudge the leads in
+// half-way so pins materialise during the descent rather than popping in
+// after the camera lands.
+const AUTOSCAN_LEADS_DELAY_MS = 500;
 
 const DEFAULT_LAYERS: LayerState = {
   pins: true,
@@ -52,6 +66,30 @@ export function App() {
       setLeads(bootstrap);
     }
   }, [bootstrap, leads.length, setLeads]);
+
+  // ── Auto-scan on first paint ────────────────────────────────────────────
+  // Fly the camera to the default postcode (EC1Y 8AF) the moment the app
+  // mounts — no /scan POST, just a search-target nudge that MapSlot picks up
+  // and a delayed lead push so pins stream in mid-flight. This avoids the
+  // "blank UK overview" dead state on first load.
+  const setSearchTarget = useSearchStore((s) => s.setTarget);
+  const autoScanFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoScanFiredRef.current) return;
+    autoScanFiredRef.current = true;
+    setSearchTarget({ ...DEFAULT_SCAN });
+    // If bootstrap leads already resolved by mount (cached), seed them after
+    // the camera has begun its flight so pins appear during the descent. If
+    // bootstrap hasn't resolved yet, the effect above takes over once it does.
+    const t = setTimeout(() => {
+      if (bootstrap && bootstrap.length > 0) {
+        setLeads(bootstrap);
+      }
+    }, AUTOSCAN_LEADS_DELAY_MS);
+    return () => clearTimeout(t);
+    // Mount-only — intentionally ignore bootstrap/setLeads churn here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Selected lead detail (only when drawer open)
   const detailQuery = useLeadDetail(drawerOpen ? selectedLeadId : null);
