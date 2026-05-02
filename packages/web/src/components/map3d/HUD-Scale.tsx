@@ -1,8 +1,56 @@
+import { useCameraStore } from "@/stores/useCameraStore";
+
 interface HUDScaleProps {
   className?: string;
 }
 
+interface ScaleStop {
+  w: string;
+  label: string;
+}
+
+/** Pick the right tick set for the current camera range (metres). */
+function pickStops(range: number | null): ScaleStop[] {
+  if (range === null || Number.isNaN(range)) {
+    // Default — fits prior layout (city scale)
+    return [
+      { w: "w-12", label: "1km" },
+      { w: "w-8", label: "500m" },
+      { w: "w-4", label: "100m" },
+    ];
+  }
+  if (range < 500) {
+    return [
+      { w: "w-12", label: "100m" },
+      { w: "w-8", label: "50m" },
+      { w: "w-4", label: "10m" },
+    ];
+  }
+  if (range < 5000) {
+    return [
+      { w: "w-12", label: "1km" },
+      { w: "w-8", label: "500m" },
+      { w: "w-4", label: "100m" },
+    ];
+  }
+  if (range < 50000) {
+    return [
+      { w: "w-12", label: "10km" },
+      { w: "w-8", label: "5km" },
+      { w: "w-4", label: "1km" },
+    ];
+  }
+  return [
+    { w: "w-12", label: "100km" },
+    { w: "w-8", label: "50km" },
+    { w: "w-4", label: "10km" },
+  ];
+}
+
 export function HUDScale({ className }: HUDScaleProps) {
+  const range = useCameraStore((s) => s.range);
+  const stops = pickStops(range);
+
   return (
     <div
       className={
@@ -13,11 +61,7 @@ export function HUDScale({ className }: HUDScaleProps) {
     >
       <div className="text-grid uppercase tracking-wide mb-1">SCALE</div>
       <div className="flex items-end gap-px h-3">
-        {[
-          { w: "w-12", label: "1km" },
-          { w: "w-8", label: "500m" },
-          { w: "w-4", label: "100m" },
-        ].map((s) => (
+        {stops.map((s) => (
           <div key={s.label} className="flex flex-col items-center gap-px">
             <div className={"h-1 " + s.w + " bg-iron-bright"} />
             <span className="text-dim tabular-nums leading-none">

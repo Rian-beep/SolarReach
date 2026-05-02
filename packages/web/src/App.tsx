@@ -13,6 +13,7 @@ import { CalculatorMode } from "@/components/calculator/CalculatorMode";
 import { AdminCentre } from "@/components/admin/AdminCentre";
 import { AtlasChartsStrip } from "@/components/charts/AtlasChartsStrip";
 import { CostConfirmProvider } from "@/components/header/CostConfirmModal";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useLeadStore } from "@/stores/useLeadStore";
 import { useDrawerStore } from "@/stores/useDrawerStore";
 import { useLeadDetail, useLeads } from "@/lib/api";
@@ -84,47 +85,67 @@ export function App() {
         {mode === "map" && (
           <main className="flex flex-1 flex-col overflow-hidden">
             <div className="relative flex-1 overflow-hidden bg-grid">
-              {/* Map canvas (Luke's MapSlot) */}
+              {/* Map canvas (Luke's MapSlot) — wrapped so a Maps SDK crash
+                  doesn't black-screen the rest of the cockpit. */}
               <div className="absolute inset-0">
-                <MapSlot
-                  leads={leads}
-                  selectedLeadId={selectedLeadId}
-                  onLeadClick={onLeadClick}
-                  fluxOverlay={selectedLead?.flux_overlay ?? null}
-                  panelLayout={selectedLead?.panel_layout ?? null}
-                />
+                <ErrorBoundary scope="map">
+                  <MapSlot
+                    leads={leads}
+                    selectedLeadId={selectedLeadId}
+                    onLeadClick={onLeadClick}
+                    fluxOverlay={selectedLead?.flux_overlay ?? null}
+                    panelLayout={selectedLead?.panel_layout ?? null}
+                    layers={layers}
+                  />
+                </ErrorBoundary>
               </div>
 
               {/* HUD overlays — absolute-positioned within map container */}
-              <HUDCoords />
-              <HUDScale />
-              <HUDLegend />
-              <HUDLayerToggle state={layers} onChange={setLayers} />
+              <ErrorBoundary scope="hud">
+                <HUDCoords />
+                <HUDScale />
+                <HUDLegend />
+                <HUDLayerToggle
+                  state={layers}
+                  onChange={setLayers}
+                  hasSelectedLead={selectedLeadId !== null}
+                />
+              </ErrorBoundary>
 
               {/* Lead count chip */}
-              <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 select-none rounded-[2px] border border-iron-bright px-2 py-1 font-mono text-xs uppercase tracking-wide text-mute"
-                style={{ backgroundColor: "rgba(10, 14, 20, 0.8)" }}>
+              <div
+                className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 select-none rounded-[2px] border border-iron-bright px-2 py-1 font-mono text-xs uppercase tracking-wide text-mute"
+                style={{ backgroundColor: "rgba(10, 14, 20, 0.8)" }}
+              >
                 <span className="text-cyan tabular-nums">{leads.length}</span>{" "}
                 LEADS · LIVE
               </div>
 
               {/* Drawer slides over map */}
-              <LeadDrawer lead={selectedLead} />
+              <ErrorBoundary scope="drawer">
+                <LeadDrawer lead={selectedLead} />
+              </ErrorBoundary>
             </div>
 
-            <AtlasChartsStrip />
+            <ErrorBoundary scope="charts">
+              <AtlasChartsStrip />
+            </ErrorBoundary>
           </main>
         )}
 
         {mode === "calculator" && (
           <main className="flex-1 overflow-y-auto">
-            <CalculatorMode />
+            <ErrorBoundary scope="calculator">
+              <CalculatorMode />
+            </ErrorBoundary>
           </main>
         )}
 
         {mode === "admin" && (
           <main className="flex-1 overflow-y-auto">
-            <AdminCentre />
+            <ErrorBoundary scope="admin">
+              <AdminCentre />
+            </ErrorBoundary>
           </main>
         )}
       </div>

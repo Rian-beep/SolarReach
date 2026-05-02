@@ -1,20 +1,24 @@
+import { useCameraStore } from "@/stores/useCameraStore";
 import { useLeadStore } from "@/stores/useLeadStore";
 
 interface HUDCoordsProps {
-  /** Override (e.g. from camera). When unset, falls back to selected lead. */
+  /** Override (rarely used; HUD reads from camera store). */
   lat?: number;
   lng?: number;
   className?: string;
 }
 
 export function HUDCoords({ lat, lng, className }: HUDCoordsProps) {
-  // All hooks before any conditional return
+  // ── ALL hooks before any conditional return (cardinal rule) ──────────
+  const camLat = useCameraStore((s) => s.lat);
+  const camLng = useCameraStore((s) => s.lng);
   const selectedLeadId = useLeadStore((s) => s.selectedLeadId);
   const leads = useLeadStore((s) => s.leads);
 
-  let lngVal = lng;
-  let latVal = lat;
-  if (lngVal === undefined || latVal === undefined) {
+  // Priority: explicit prop > live camera > selected lead > "—".
+  let latVal: number | undefined = lat ?? camLat ?? undefined;
+  let lngVal: number | undefined = lng ?? camLng ?? undefined;
+  if (latVal === undefined || lngVal === undefined) {
     const selected = leads.find((l) => l._id === selectedLeadId);
     if (selected?.geo?.point?.coordinates) {
       lngVal = selected.geo.point.coordinates[0];

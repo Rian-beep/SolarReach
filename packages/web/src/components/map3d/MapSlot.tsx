@@ -4,6 +4,18 @@
  * Loads `<gmp-map-3d>` Web Component via the Maps JS SDK (libraries=maps3d, v=alpha)
  * and wires lead markers + per-pixel solar radiance overlay + per-panel polygon layout.
  *
+ * Cinematic camera (A8):
+ *   - Boot: UK-wide 600km altitude, tilt 30° — communicates "whole UK market".
+ *   - First scan completes (leads array first populates) → fly to centroid of
+ *     leads (avg lat/lng), range 2000m, tilt 55°. Once per session.
+ *   - Lead selected → fly down to building, range 220m, tilt 67°, alt 80m.
+ *   - prefers-reduced-motion → snap (no fly), still updates camera state.
+ *
+ * Marker styling (alpha SDK has no shadow-DOM ::part hooks yet — graceful
+ * degrade): we add `data-score-band` (low/mid/high) + `data-selected` to each
+ * `<gmp-marker-3d-interactive-element>`. CSS in index.css targets these
+ * attribute selectors and styles the marker host element where the SDK lets us.
+ *
  * Cardinal rules respected:
  *   - Server-side ray-cast clipping is in the API (not here) — we render whatever
  *     panels are in props.panelLayout.
@@ -12,8 +24,10 @@
  *   - We DO NOT auto-fire paid APIs from this component; flux/panels come from
  *     props (caller controls invocation via cost-confirm modal).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Lead, FluxOverlay, PanelLayout } from "@/lib/types";
+import type { LayerState } from "@/components/map3d/HUD-LayerToggle";
+import { useCameraStore } from "@/stores/useCameraStore";
 
 declare global {
   interface Window {
@@ -65,14 +79,37 @@ export interface MapSlotProps {
   onLeadClick: (id: string) => void;
   fluxOverlay: FluxOverlay | null;
   panelLayout: PanelLayout | null;
+  /**
+   * A8 PROPOSAL — additive prop (default preserves prior behaviour: all on
+   * except radiance/panels which respect the parent's state if passed).
+   * When unset, every overlay is shown (legacy behaviour).
+   * See CONTRACTS.md § 4.
+   */
+  layers?: LayerState;
 }
 
 const GOOGLE_MAPS_API_KEY =
   ((import.meta as unknown as { env?: Record<string, string> }).env
     ?.VITE_GOOGLE_MAPS_API_KEY ?? "") as string;
 
-// Default camera over central London (Old Street, EC1Y 8AF — demo postcode)
-const DEFAULT_CENTER = { lat: 51.5256, lng: -0.0876, alt: 250 };
+// UK-wide overview camera (central England). 600km altitude / 500km range /
+// 30° tilt reads as "whole-country tactical view" on first paint.
+const UK_CENTER = { lat: 54.5, lng: -2.5, alt: 600000 };
+const UK_RANGE = 500000;
+const UK_TILT = 30;
+
+// First-scan-complete camera tuning
+const SCAN_RANGE = 2000;
+const SCAN_TILT = 55;
+
+// Lead-selected camera tuning
+const LEAD_RANGE = 220;
+const LEAD_TILT = 67;
+const LEAD_ALT = 80;
+
+// Animation durations (ms). Linear / ease-out only per Gotham theme.
+const FLY_BOOT_TO_SCAN_MS = 1500;
+const FLY_SCAN_TO_LEAD_MS = 1200;
 
 function loadMapsSdk(apiKey: string): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
@@ -101,16 +138,90 @@ function loadMapsSdk(apiKey: string): Promise<void> {
   });
 }
 
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+interface FlyToOpts {
+  lat: number;
+  lng: number;
+  alt?: number;
+  range: number;
+  tilt: number;
+  durationMs: number;
+}
+
+function flyOrSnap(map: HTMLElement, opts: FlyToOpts) {
+  const reduced = prefersReducedMotion();
+  const el = map as unknown as {
+    flyCameraTo?: (opts: unknown) => void;
+    setAttribute: (k: string, v: string) => void;
+  };
+  if (reduced || typeof el.flyCameraTo !== "function") {
+    el.setAttribute(
+      "center",
+      `${opts.lat}, ${opts.lng}, ${opts.alt ?? 0}`,
+    );
+    el.setAttribute("range", String(opts.range));
+    el.setAttribute("tilt", String(opts.tilt));
+    return;
+  }
+  try {
+    el.flyCameraTo({
+      endCamera: {
+        center: { lat: opts.lat, lng: opts.lng, altitude: opts.alt ?? 0 },
+        tilt: opts.tilt,
+        range: opts.range,
+      },
+      durationMillis: opts.durationMs,
+    });
+  } catch {
+    /* graceful degrade */
+  }
+}
+
 export function MapSlot({
   leads,
   selectedLeadId,
   onLeadClick,
   fluxOverlay,
   panelLayout,
+  layers,
 }: MapSlotProps) {
+  // ── ALL hooks before any conditional return (cardinal rule) ──────────
   const mapRef = useRef<HTMLElement | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+
+  // Track whether we've performed the boot→scan flyout once. Resets only
+  // if leads is cleared back to empty (e.g. reset action).
+  const flewToScanRef = useRef(false);
+
+  // Track previous leads.length so we know when leads JUST populated.
+  const prevLeadsLenRef = useRef(0);
+
+  // Camera store mutator (HUDs subscribe directly).
+  const setCamera = useCameraStore((s) => s.set);
+
+  // Defaults: when `layers` is not provided, treat all as ON (legacy).
+  const showPins = layers ? layers.pins : true;
+  const showRadiance = layers ? layers.radiance : true;
+  const showPanels = layers ? layers.panels : true;
+  const showPolygons = layers ? layers.polygons : true;
+
+  // Centroid of currently-loaded leads (for first-scan flyout).
+  const centroid = useMemo(() => {
+    const pts = leads
+      .map((l) => l.geo?.point?.coordinates)
+      .filter((c): c is [number, number] => Array.isArray(c) && c.length === 2);
+    if (pts.length === 0) return null;
+    const sum = pts.reduce(
+      (acc, [lng, lat]) => ({ lng: acc.lng + lng, lat: acc.lat + lat }),
+      { lng: 0, lat: 0 },
+    );
+    return { lng: sum.lng / pts.length, lat: sum.lat / pts.length };
+  }, [leads]);
 
   // Load SDK once
   useEffect(() => {
@@ -136,6 +247,78 @@ export function MapSlot({
     return () => root.removeEventListener("gmp-click", handler);
   }, [sdkReady, onLeadClick]);
 
+  // Subscribe to camera changes → push into useCameraStore for HUDs.
+  useEffect(() => {
+    if (!sdkReady || !mapRef.current) return;
+    const root = mapRef.current;
+    const handler = () => {
+      const m = root as unknown as {
+        center?: { lat: number; lng: number };
+        range?: number;
+        tilt?: number;
+        heading?: number;
+      };
+      // The alpha SDK exposes these as attributes; reading via getAttribute
+      // is the most reliable cross-build path.
+      const centerStr = root.getAttribute("center");
+      const rangeAttr = root.getAttribute("range");
+      const tiltAttr = root.getAttribute("tilt");
+      const headingAttr = root.getAttribute("heading");
+      let lat: number | null = null;
+      let lng: number | null = null;
+      if (centerStr) {
+        const parts = centerStr.split(",").map((s) => parseFloat(s.trim()));
+        if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+          lat = parts[0];
+          lng = parts[1];
+        }
+      } else if (m.center) {
+        lat = m.center.lat;
+        lng = m.center.lng;
+      }
+      setCamera({
+        lat,
+        lng,
+        range: rangeAttr ? parseFloat(rangeAttr) : (m.range ?? null),
+        tilt: tiltAttr ? parseFloat(tiltAttr) : (m.tilt ?? null),
+        heading: headingAttr ? parseFloat(headingAttr) : (m.heading ?? null),
+      });
+    };
+    // Seed the store immediately with initial camera.
+    handler();
+    root.addEventListener("gmp-camerachange", handler);
+    return () => root.removeEventListener("gmp-camerachange", handler);
+  }, [sdkReady, setCamera]);
+
+  // First-scan-complete: leads JUST populated → fly to centroid (once).
+  useEffect(() => {
+    if (!sdkReady || !mapRef.current) return;
+    const prev = prevLeadsLenRef.current;
+    const curr = leads.length;
+    prevLeadsLenRef.current = curr;
+    // Reset the latch if leads is wiped back to zero.
+    if (curr === 0) {
+      flewToScanRef.current = false;
+      return;
+    }
+    if (
+      !flewToScanRef.current &&
+      prev === 0 &&
+      curr > 0 &&
+      centroid &&
+      !selectedLeadId
+    ) {
+      flewToScanRef.current = true;
+      flyOrSnap(mapRef.current, {
+        lat: centroid.lat,
+        lng: centroid.lng,
+        range: SCAN_RANGE,
+        tilt: SCAN_TILT,
+        durationMs: FLY_BOOT_TO_SCAN_MS,
+      });
+    }
+  }, [sdkReady, leads.length, centroid, selectedLeadId]);
+
   // Camera fly-to selected lead
   useEffect(() => {
     if (!sdkReady || !mapRef.current || !selectedLeadId) return;
@@ -143,28 +326,14 @@ export function MapSlot({
     const coords = lead?.geo?.point?.coordinates;
     if (!coords) return;
     const [lng, lat] = coords;
-    const map = mapRef.current as unknown as {
-      flyCameraTo?: (opts: unknown) => void;
-      setAttribute: (k: string, v: string) => void;
-    };
-    try {
-      if (typeof map.flyCameraTo === "function") {
-        map.flyCameraTo({
-          endCamera: {
-            center: { lat, lng, altitude: 80 },
-            tilt: 67,
-            range: 220,
-          },
-          durationMillis: 1200,
-        });
-      } else {
-        map.setAttribute("center", `${lat}, ${lng}, 80`);
-        map.setAttribute("range", "220");
-        map.setAttribute("tilt", "67");
-      }
-    } catch {
-      /* graceful degrade */
-    }
+    flyOrSnap(mapRef.current, {
+      lat,
+      lng,
+      alt: LEAD_ALT,
+      range: LEAD_RANGE,
+      tilt: LEAD_TILT,
+      durationMs: FLY_SCAN_TO_LEAD_MS,
+    });
   }, [sdkReady, selectedLeadId, leads]);
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -201,31 +370,34 @@ export function MapSlot({
     <div className="absolute inset-0">
       <gmp-map-3d
         ref={mapRef as React.RefObject<HTMLElement>}
-        center={`${DEFAULT_CENTER.lat}, ${DEFAULT_CENTER.lng}, ${DEFAULT_CENTER.alt}`}
-        range="900"
-        tilt="55"
+        center={`${UK_CENTER.lat}, ${UK_CENTER.lng}, ${UK_CENTER.alt}`}
+        range={String(UK_RANGE)}
+        tilt={String(UK_TILT)}
         mode="hybrid"
         style={{ width: "100%", height: "100%" }}
       >
-        {leads.map((lead) => {
-          const c = lead.geo?.point?.coordinates;
-          if (!c) return null;
-          const [lng, lat] = c;
-          const score = lead.scores?.composite_score ?? 0;
-          const isSelected = lead._id === selectedLeadId;
-          return (
-            <gmp-marker-3d-interactive-element
-              key={lead._id}
-              data-lead-id={lead._id}
-              position={`${lat}, ${lng}, 30`}
-              altitude-mode="RELATIVE_TO_GROUND"
-              label={String(score)}
-              data-selected={isSelected ? "1" : "0"}
-            />
-          );
-        })}
+        {showPins &&
+          leads.map((lead) => {
+            const c = lead.geo?.point?.coordinates;
+            if (!c) return null;
+            const [lng, lat] = c;
+            const score = lead.scores?.composite_score ?? 0;
+            const band = score >= 70 ? "high" : score >= 50 ? "mid" : "low";
+            const isSelected = lead._id === selectedLeadId;
+            return (
+              <gmp-marker-3d-interactive-element
+                key={lead._id}
+                data-lead-id={lead._id}
+                position={`${lat}, ${lng}, 30`}
+                altitude-mode="RELATIVE_TO_GROUND"
+                label={String(score)}
+                data-score-band={band}
+                data-selected={isSelected ? "1" : "0"}
+              />
+            );
+          })}
 
-        {fluxOverlay?.bbox && (
+        {showRadiance && fluxOverlay?.bbox && (
           <gmp-polygon-3d-element
             altitude-mode="RELATIVE_TO_GROUND"
             fill-color="#FFB02055"
@@ -234,18 +406,33 @@ export function MapSlot({
           />
         )}
 
-        {panelLayout?.panels?.map((p, i) => {
-          if (!p.corners || p.corners.length < 3) return null;
-          return (
-            <gmp-polygon-3d-element
-              key={`panel-${i}`}
-              altitude-mode="RELATIVE_TO_GROUND"
-              fill-color="#1FB6FF66"
-              stroke-color="#1FB6FF"
-              stroke-width="1"
-            />
-          );
-        })}
+        {showPanels &&
+          panelLayout?.panels?.map((p, i) => {
+            if (!p.corners || p.corners.length < 3) return null;
+            return (
+              <gmp-polygon-3d-element
+                key={`panel-${i}`}
+                altitude-mode="RELATIVE_TO_GROUND"
+                fill-color="#1FB6FF66"
+                stroke-color="#1FB6FF"
+                stroke-width="1"
+              />
+            );
+          })}
+
+        {showPolygons &&
+          (() => {
+            const sel = leads.find((l) => l._id === selectedLeadId);
+            if (!sel?.rooftop_polygon?.coordinates?.[0]) return null;
+            return (
+              <gmp-polygon-3d-element
+                altitude-mode="RELATIVE_TO_GROUND"
+                fill-color="#20D08233"
+                stroke-color="#20D082"
+                stroke-width="1"
+              />
+            );
+          })()}
       </gmp-map-3d>
     </div>
   );

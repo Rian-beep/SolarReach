@@ -254,3 +254,41 @@ body {
   background: #1fb6ff40;
   color: #e8edf5;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+   3D map markers — score-band colouring + selection pop.
+   The Maps Photorealistic alpha SDK does not currently expose its
+   marker shadow DOM via ::part(...) (verified 2026-05) so we style
+   the host element only. The label text is rendered inside shadow DOM
+   we cannot reach; what we can do is tint the marker host and scale
+   it so selected pins read clearly above the cluster.
+   If a future SDK build exposes ::part hooks, add rules here using
+   ::part(label) and ::part(pin) for richer visuals.
+   ─────────────────────────────────────────────────────────────────── */
+gmp-marker-3d-interactive-element {
+  --sr-marker-color: #ffb020;
+  /* Smooth size transitions when selection flips. Linear / ease-out
+     per Gotham motion rules. */
+  transition:
+    transform 200ms ease-out,
+    filter 200ms ease-out;
+}
+gmp-marker-3d-interactive-element[data-score-band="low"] {
+  --sr-marker-color: #ff4757;
+}
+gmp-marker-3d-interactive-element[data-score-band="mid"] {
+  --sr-marker-color: #ffb020;
+}
+gmp-marker-3d-interactive-element[data-score-band="high"] {
+  --sr-marker-color: #20d082;
+}
+gmp-marker-3d-interactive-element[data-selected="1"] {
+  transform: scale(1.35);
+  filter: drop-shadow(0 0 6px var(--sr-marker-color));
+  z-index: 10;
+}
+gmp-marker-3d-interactive-element[data-selected="0"]:hover {
+  transform: scale(1.1);
+  filter: brightness(1.15);
+}
+

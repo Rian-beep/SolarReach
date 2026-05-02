@@ -19,6 +19,9 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "")
 os.environ.setdefault("ELEVENLABS_API_KEY", "")
 os.environ.setdefault("MONGO_URI", "mongodb://localhost:27017/?authSource=admin")
 os.environ.setdefault("MONGO_DB", "solarreach_test")
+# Force-clear Google key so tests don't accidentally hit live Solar API.
+# (`.env.local` would otherwise leak in via pydantic-settings.)
+os.environ["GOOGLE_MAPS_API_KEY"] = ""
 
 
 @pytest_asyncio.fixture

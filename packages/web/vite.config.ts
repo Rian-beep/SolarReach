@@ -7,6 +7,9 @@ const proxyTarget = process.env.VITE_API_BASE || "http://localhost:8000";
 const proxyPaths = ["/api", "/scan", "/lead", "/voice", "/admin", "/financial", "/health"];
 
 export default defineConfig({
+  // Load .env / .env.local from project root (monorepo) so VITE_* vars
+  // populated in the root file are picked up here.
+  envDir: path.resolve(__dirname, "../.."),
   plugins: [react()],
   resolve: {
     alias: {

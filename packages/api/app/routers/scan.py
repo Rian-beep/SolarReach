@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -22,6 +23,8 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from app.deps import get_db
+
+log = logging.getLogger("solarreach.api.scan")
 from app.services.audit import log_audit
 from app.services.change_streams import iter_new_leads
 
@@ -65,48 +68,27 @@ async def create_scan(
         metadata={"postcode": body.postcode, "client_id": body.client_id},
     )
 
-    # A2 STUB: synthesise a small set of leads inline so frontend has data.
-    # TODO(A4): replace with real codex pipeline trigger.
-    seeded: list[dict] = []
-    for i in range(min(body.limit, 5)):
-        lead_id = f"lead_{uuid.uuid4()}"
-        seeded.append(
-            {
-                "_id": lead_id,
-                "client_id": body.client_id,
-                "address": f"{i + 1} Demo Street, {body.postcode}",
-                "postcode": body.postcode,
-                "borough": "London Borough of Camden",
-                "premises_type": ["office", "retail", "warehouse"][i % 3],
-                "geo": {
-                    "point": {
-                        "type": "Point",
-                        "coordinates": [-0.0876 + i * 0.001, 51.5256 + i * 0.001],
-                    }
-                },
-                "scores": {
-                    "solar_roi": 0.6 + 0.05 * i,
-                    "financial_health": 0.5 + 0.04 * i,
-                    "social_impact": 0.4 + 0.03 * i,
-                    "composite_score": 60 + i * 4,
-                    "scored_at": now,
-                },
-                "owner": {
-                    "company_id": None,
-                    "company_name": f"Demo Holdings {i + 1} Ltd",
-                    "source": "synthesized",
-                },
-                "scan_id": scan_id,
-                "created_at": now,
-                "updated_at": now,
-            }
-        )
-    if seeded:
-        await db.leads.insert_many(seeded)
+    # Real path: query existing leads matching postcode (A1's seeded data
+    # populated by scripts/seed_demo_real.py + match_leads_to_inspire.py).
+    # We do NOT synthesise on every scan — that pollutes the corpus and
+    # produces fake "Demo Holdings N Ltd" owners which kill the demo story.
+    #
+    # Tag the matched leads with this scan_id so the SSE stream picks them up.
+    matched = await db.leads.update_many(
+        {"client_id": body.client_id, "postcode": body.postcode},
+        {"$set": {"scan_id": scan_id}},
+    )
+    lead_count = matched.modified_count
+    log.info(
+        "scan_id=%s postcode=%s matched=%d real leads (no synth)",
+        scan_id,
+        body.postcode,
+        lead_count,
+    )
 
     return ScanResponse(
         scan_id=scan_id,
-        lead_count=len(seeded),
+        lead_count=lead_count,
         stream_url=f"/scan/{scan_id}/stream",
     )
 

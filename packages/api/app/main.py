@@ -89,6 +89,10 @@ def create_app() -> FastAPI:
     static_dir = Path("/tmp/decks")
     static_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static/pitches", StaticFiles(directory=str(static_dir)), name="pitches")
+    # Flux PNGs (Solar API → reproject → inferno colormap, see routers/flux.py).
+    flux_dir = Path("/tmp/flux")
+    flux_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static/flux", StaticFiles(directory=str(flux_dir)), name="flux")
     return app
 
 

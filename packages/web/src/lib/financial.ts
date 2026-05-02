@@ -110,6 +110,69 @@ export function npv25yr(
   return npv;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Drawer UX helpers (A9): per-funding-model monthly payment, ROI %, year fmt.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type FundingModelId =
+  | "capex"
+  | "free_install"
+  | "lease_purchase"
+  | "operational_lease"
+  | "hire_purchase";
+
+/**
+ * Estimated monthly payment for a given funding model against this lead.
+ * Approximations — sufficient for sales-room interactivity, not contracts.
+ *
+ *  - capex             : 0  (paid upfront)
+ *  - free_install (PPA): pay-per-kWh, monthly ≈ annual_saving / 12 * 0.85
+ *                        (caller should pass annual_saving via `annualSavingGbp`)
+ *  - lease_purchase    : (capex + capex*rate*years) / (years*12)   (simple)
+ *  - operational_lease : capex * 0.014                              (~£14/£1k/mo)
+ *  - hire_purchase     : (capex*0.10) deposit then
+ *                         (capex*0.90 + capex*0.90*rate*years) / (years*12)
+ */
+export function computeMonthlyPayment(
+  capexGbp: number,
+  model: FundingModelId,
+  termYears: number,
+  interestRate = 0.06,
+  annualSavingGbp = 0,
+): number {
+  if (capexGbp <= 0) return 0;
+  switch (model) {
+    case "capex":
+      return 0;
+    case "free_install":
+      // PPA monthly bill at ~85% of self-saved energy value.
+      return (annualSavingGbp * 0.85) / 12;
+    case "lease_purchase": {
+      const total = capexGbp + capexGbp * interestRate * termYears;
+      return total / (termYears * 12);
+    }
+    case "operational_lease":
+      return capexGbp * 0.014; // typical 1.4% of capex/month for OpLease
+    case "hire_purchase": {
+      const financed = capexGbp * 0.9; // 10% deposit
+      const total = financed + financed * interestRate * termYears;
+      return total / (termYears * 12);
+    }
+  }
+}
+
+/** ROI percent = annual_saving / capex * 100 (returns 0 on bad inputs). */
+export function computeRoi(capexGbp: number, annualSavingGbpVal: number): number {
+  if (capexGbp <= 0) return 0;
+  return (annualSavingGbpVal / capexGbp) * 100;
+}
+
+/** "7.8 yr" — single-decimal mono-friendly year duration. */
+export function formatYears(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `${n.toFixed(1)} yr`;
+}
+
 export interface FundingModel {
   id: "outright" | "loan" | "ppa" | "lease" | "shared_savings";
   label: string;

@@ -1,7 +1,18 @@
-"""POST /lead/<id>/panels — STUB.
+"""POST /lead/<id>/panels — REAL Google Solar API integration.
 
-Mock panel array so MapSlot can render. Luke replaces with real Solar API
-`findClosest` → ray-cast clip against `rooftop_polygon` → persist `panel_layout`.
+Pipeline:
+  findClosest (HIGH) → extract `solarPanels` array → meters-rotation
+  per panel (azimuth → 4 corners in lng/lat) → server-side ray-cast
+  clip against `lead.rooftop_polygon` (INSPIRE-sourced when available)
+  → persist `lead.panel_layout`.
+
+Cardinal rules enforced:
+- 80m findClosest reject (services/solar_api).
+- DO NOT overwrite `lead.rooftop_polygon` with Solar API bbox — we only
+  read it; never $set it from this endpoint.
+- Server-side ray-cast clip BEFORE persisting (services/solar_api).
+- METERS-based rotation, `theta = -azimuth` (services/solar_api).
+- Audit-log every paid call BEFORE making it.
 """
 from __future__ import annotations
 
@@ -11,18 +22,23 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.deps import get_db
+from app.config import Settings
+from app.deps import get_app_settings, get_db
+from app.services import solar_api
 from app.services.audit import log_audit
 
 router = APIRouter()
 log = logging.getLogger("solarreach.api.panels")
 
 
-def _grid_panels(lng: float, lat: float, count: int = 12) -> list[dict]:
+def _mock_grid(lng: float, lat: float, count: int = 12) -> list[dict]:
+    """Fallback grid when GOOGLE_MAPS_API_KEY missing or Solar API fails.
+
+    Same payload shape as the real path so frontend never sees a gap.
+    """
     panels: list[dict] = []
-    # ~2m x 1m grid, 12 panels = 4 cols x 3 rows.
     cols, rows = 4, 3
-    panel_lng = 0.00002  # ~1.4 m at UK lat
+    panel_lng = 0.00002
     panel_lat = 0.00001
     for r in range(rows):
         for c in range(cols):
@@ -51,28 +67,81 @@ def _grid_panels(lng: float, lat: float, count: int = 12) -> list[dict]:
 async def panels(
     lead_id: str,
     db: AsyncIOMotorDatabase = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
 ):
     lead = await db.leads.find_one({"_id": lead_id})
     if not lead:
         raise HTTPException(404, "lead not found")
+
+    coords = (lead.get("geo", {}).get("point", {}) or {}).get("coordinates")
+    if coords and len(coords) == 2:
+        lng, lat = float(coords[0]), float(coords[1])
+    else:
+        # No geo on lead — fall back to demo coords; downstream we'll
+        # serve the mock grid so the frontend never gaps.
+        lng, lat = -0.0876, 51.5256
+    rooftop = lead.get("rooftop_polygon")
+
+    # Graceful degrade if no key.
+    if not settings.google_maps_api_key:
+        grid = _mock_grid(lng, lat, 12)
+        payload = {
+            "panels": grid,
+            "panel_count": len(grid),
+            "annual_kwh": sum(p["kwh_yr"] for p in grid),
+            "clipped_at": datetime.now(timezone.utc).isoformat(),
+            "clip_method": "stub_grid",
+            "mock": True,
+        }
+        await db.leads.update_one(
+            {"_id": lead_id}, {"$set": {"panel_layout": payload}}
+        )
+        return payload
+
     await log_audit(
         db,
         action="api.call",
         lead_id=lead_id,
-        cost_cents=0,
-        metadata={"provider": "google_solar.findClosest", "stub": True},
+        cost_cents=1,
+        metadata={"provider": "google_solar.findClosest"},
     )
-    log.info("# A2 STUB panels lead=%s", lead_id)
-    coords = (lead.get("geo", {}).get("point", {}) or {}).get("coordinates")
-    lng, lat = coords if coords and len(coords) == 2 else (-0.0876, 51.5256)
-    grid = _grid_panels(lng, lat, 12)
-    annual = sum(p["kwh_yr"] for p in grid)
+    try:
+        insights = await solar_api.find_closest_building(lat, lng, settings)
+    except solar_api.SolarAPIError as e:
+        log.warning("panels findClosest failed lead=%s err=%s", lead_id, e)
+        grid = _mock_grid(lng, lat, 12)
+        payload = {
+            "panels": grid,
+            "panel_count": len(grid),
+            "annual_kwh": sum(p["kwh_yr"] for p in grid),
+            "clipped_at": datetime.now(timezone.utc).isoformat(),
+            "clip_method": "stub_grid",
+            "mock": True,
+            "mock_reason": str(e),
+        }
+        await db.leads.update_one(
+            {"_id": lead_id}, {"$set": {"panel_layout": payload}}
+        )
+        return payload
+
+    real_panels = solar_api.panels_from_solar_api(insights, rooftop)
+    annual = sum(p["kwh_yr"] for p in real_panels)
     payload = {
-        "panels": grid,
-        "panel_count": len(grid),
+        "panels": real_panels,
+        "panel_count": len(real_panels),
         "annual_kwh": annual,
         "clipped_at": datetime.now(timezone.utc).isoformat(),
-        "clip_method": "stub_grid",  # TODO(LUKE): inspire_polygon_raycast.
+        "clip_method": "inspire_polygon_raycast",
     }
-    await db.leads.update_one({"_id": lead_id}, {"$set": {"panel_layout": payload}})
+    # IMPORTANT: only set panel_layout. Never overwrite rooftop_polygon
+    # (cardinal rule — preserves INSPIRE source).
+    await db.leads.update_one(
+        {"_id": lead_id}, {"$set": {"panel_layout": payload}}
+    )
+    log.info(
+        "panels ok lead=%s count=%d annual_kwh=%.0f",
+        lead_id,
+        payload["panel_count"],
+        payload["annual_kwh"],
+    )
     return payload

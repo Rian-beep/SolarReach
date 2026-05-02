@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -21,6 +20,7 @@ from pydantic import BaseModel
 from app.config import Settings
 from app.deps import get_app_settings, get_db
 from app.services.audit import log_audit
+from app.services.companies_house import CompaniesHouseClient
 
 router = APIRouter()
 log = logging.getLogger("solarreach.api.leads")
@@ -63,6 +63,7 @@ async def get_lead(
 
 class RefreshDirectorsResponse(BaseModel):
     directors: list[dict]
+    warning: str | None = None
 
 
 @router.post("/lead/{lead_id}/refresh_directors", response_model=RefreshDirectorsResponse)
@@ -71,6 +72,14 @@ async def refresh_directors(
     db: AsyncIOMotorDatabase = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ) -> RefreshDirectorsResponse:
+    """Pull officers for a lead's owning company from Companies House and
+    upsert them into the `directors` collection. Idempotent.
+
+    Behaviours:
+    - Lead has no company   → 400
+    - Company has no ch_number  → return [] with warning="no_companies_house_link"
+    - CH key not configured  → return [] with warning="no_ch_api_key" (mock fallback for tests)
+    """
     lead = await db.leads.find_one({"_id": lead_id})
     if not lead:
         raise HTTPException(404, "lead not found")
@@ -83,38 +92,113 @@ async def refresh_directors(
         raise HTTPException(404, "company not found")
 
     ch_number = company.get("ch_number")
-    # Audit BEFORE the call (cardinal rule).
-    await log_audit(
-        db,
-        action="api.call",
-        lead_id=lead_id,
-        cost_cents=0,
-        metadata={"provider": "companies_house", "ch_number": ch_number},
+
+    if not ch_number:
+        await log_audit(
+            db,
+            action="lead.refresh_directors",
+            lead_id=lead_id,
+            cost_cents=0,
+            metadata={"provider": "companies_house", "skipped": "no_ch_number"},
+        )
+        return RefreshDirectorsResponse(directors=[], warning="no_companies_house_link")
+
+    if not settings.companies_house_api_key:
+        # No key configured → return small stub so frontend renders, but flag it.
+        log.info("# refresh_directors no CH key, returning stub for lead=%s", lead_id)
+        await log_audit(
+            db,
+            action="lead.refresh_directors",
+            lead_id=lead_id,
+            cost_cents=0,
+            metadata={"provider": "companies_house", "skipped": "no_ch_api_key"},
+        )
+        stub = {
+            "_id": f"director_{uuid.uuid4()}",
+            "company_id": company_id,
+            "name": "Patel, Sarah",
+            "name_display": "Sarah Patel",
+            "role": "DIRECTOR",
+            "appointed_on": "2018-04-01",
+        }
+        return RefreshDirectorsResponse(directors=[stub], warning="no_ch_api_key")
+
+    # --- Live Companies House path ---
+    async with CompaniesHouseClient(
+        settings.companies_house_api_key, db=db, actor="agent_a7_refresh_directors"
+    ) as ch:
+        try:
+            officers = await ch.get_officers(ch_number, limit=20)
+        except Exception as e:  # noqa: BLE001
+            log.warning("CH officers fetch failed for ch=%s: %s", ch_number, type(e).__name__)
+            await log_audit(
+                db,
+                action="lead.refresh_directors",
+                lead_id=lead_id,
+                cost_cents=0,
+                metadata={"provider": "companies_house", "error": type(e).__name__},
+            )
+            raise HTTPException(502, "companies house request failed")
+
+    director_docs: list[dict] = []
+    director_ids: list[str] = []
+    for off in officers:
+        # Stable id by ch_officer_id + company so re-runs are idempotent.
+        if off.ch_officer_id:
+            director_id = f"director_{company_id[:24]}_{off.ch_officer_id[:24]}"
+        else:
+            # Fall back to a deterministic hash of the raw name + role + appointed_on.
+            tag = f"{off.name}|{off.role}|{off.appointed_on or ''}"
+            tag_hash = uuid.uuid5(uuid.NAMESPACE_OID, tag).hex[:16]
+            director_id = f"director_{company_id[:24]}_{tag_hash}"
+
+        doc = {
+            "_id": director_id,
+            "company_id": company_id,
+            "name": off.name,
+            "name_display": off.name_display,
+            "role": off.role,
+            "appointed_on": off.appointed_on,
+            "resigned_on": off.resigned_on,
+            "ch_officer_id": off.ch_officer_id or None,
+            "occupation": off.occupation,
+            "nationality": off.nationality,
+        }
+        await db.directors.update_one(
+            {"_id": director_id}, {"$set": doc}, upsert=True
+        )
+        director_docs.append(doc)
+        director_ids.append(director_id)
+
+    # Update parent company doc with the list of director ids.
+    await db.companies.update_one(
+        {"_id": company_id},
+        {"$set": {"directors": director_ids}},
     )
 
-    if not ch_number or not settings.companies_house_api_key:
-        # A2 STUB — return mock directors so frontend can render.
-        log.info("# A2 STUB refresh_directors lead=%s", lead_id)
-        mock = [
-            {
-                "_id": f"director_{uuid.uuid4()}",
-                "company_id": company_id,
-                "name": "Patel, Sarah",
-                "name_display": "Sarah Patel",
-                "role": "Director",
-                "appointed_on": "2018-04-01",
-            }
-        ]
-        return RefreshDirectorsResponse(directors=mock)
-
-    # Live path — Companies House officers list.
-    url = f"https://api.company-information.service.gov.uk/company/{ch_number}/officers"
-    async with httpx.AsyncClient(timeout=10.0) as cx:
-        resp = await cx.get(url, auth=(settings.companies_house_api_key, ""))
-    if resp.status_code != 200:
-        raise HTTPException(502, f"companies house: {resp.status_code}")
-    data = resp.json()
-    return RefreshDirectorsResponse(directors=data.get("items", []))
+    await log_audit(
+        db,
+        action="lead.refresh_directors",
+        lead_id=lead_id,
+        cost_cents=0,
+        metadata={
+            "provider": "companies_house",
+            "ch_number": ch_number,
+            "officer_count": len(officers),
+        },
+    )
+    # Return slim view (no internal _ids etc., but include name_display/role)
+    public = [
+        {
+            "name_display": d["name_display"],
+            "name": d["name"],
+            "role": d["role"],
+            "appointed_on": d["appointed_on"],
+            "resigned_on": d["resigned_on"],
+        }
+        for d in director_docs
+    ]
+    return RefreshDirectorsResponse(directors=public)
 
 
 # --- POST /lead/<id>/build_org ---

@@ -234,9 +234,18 @@ data: {"scan_id": "...", "lead_count": 50}
 ## 4. Frontend Component Contracts
 
 ### `<MapSlot />` (USER-OWNED — Google Maps lane)
-**Props**: `{ leads: Lead[], selectedLeadId: string|null, onLeadClick: (id) => void, fluxOverlay: FluxOverlay|null, panelLayout: PanelLayout|null }`
+**Props**: `{ leads: Lead[], selectedLeadId: string|null, onLeadClick: (id) => void, fluxOverlay: FluxOverlay|null, panelLayout: PanelLayout|null, layers?: LayerState }`
 **Renders**: Google `<gmp-map-3d>` with markers + flux PNG + panels.
 **Lazy-loaded**: dynamic import to keep main bundle small.
+
+> **A8 PROPOSAL — additive `layers` prop (2026-05-02)**
+> `layers?: { pins: boolean, radiance: boolean, panels: boolean, polygons: boolean }`
+> Optional. Default (when omitted): all overlays render (legacy behaviour).
+> When provided, MapSlot hides any layer set to `false`. App.tsx lifts the
+> state and passes it down so `<HUDLayerToggle />` flips actual visibility.
+> Lead-dependent layers (radiance/panels/polygons) only have something to
+> render once a lead is selected — `<HUDLayerToggle />` greys those toggles
+> out via the new `hasSelectedLead` prop.
 
 ### `<LeadDrawer />` (A3-owned)
 4 tabs: Intel · Pitch · Voice · Reference. Reads from `useLeadStore()` (Zustand).
