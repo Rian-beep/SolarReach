@@ -524,20 +524,20 @@ export function MapSlot({
           m.range = UK_RANGE;
           m.tilt = UK_TILT;
 
-          // SATELLITE mode → Photorealistic 3D imagery, no road/POI labels.
-          // HYBRID adds road labels + Google's own POI pins (CodeNode,
-          // Halifax, M&S etc.) which clutter our pin layer. SATELLITE is
-          // the cleanest base for an overlay-heavy cockpit.
+          // HYBRID mode renders Photorealistic 3D imagery + roads/labels +
+          // our overlays. SATELLITE mode also hid OUR markers/polygons in
+          // testing — alpha SDK ties overlay render passes to label render
+          // pass. HYBRID with Google's POI clutter is the lesser evil.
           const g = (window as unknown as {
             google?: {
               maps?: { maps3d?: { MapMode?: Record<string, unknown> } };
             };
           }).google;
           const MapMode = g?.maps?.maps3d?.MapMode;
-          if (MapMode && typeof MapMode.SATELLITE !== "undefined") {
-            m.mode = MapMode.SATELLITE;
+          if (MapMode && typeof MapMode.HYBRID !== "undefined") {
+            m.mode = MapMode.HYBRID;
           } else {
-            for (const candidate of ["SATELLITE", "Satellite", "HYBRID", "Hybrid"]) {
+            for (const candidate of ["HYBRID", "Hybrid", "SATELLITE", "Satellite"]) {
               try {
                 m.mode = candidate;
                 break;
@@ -567,12 +567,13 @@ export function MapSlot({
                 ref={(el) => {
                   if (!el) return;
                   const mk = el as unknown as Record<string, unknown>;
-                  // Altitude 120m so the pin floats clearly ABOVE London
-                  // buildings (most are 30-100m tall). RELATIVE_TO_GROUND
-                  // means it tracks terrain.
-                  mk.position = { lat, lng, altitude: 120 };
+                  // Altitude 60m: above most low/mid buildings, below
+                  // tower-block tops. extruded=true draws a stem to ground.
+                  // The marker chip itself renders the SDK's default pin
+                  // sprite (NOT just the label) — clearly visible.
+                  mk.position = { lat, lng, altitude: 60 };
                   mk.altitudeMode = "RELATIVE_TO_GROUND";
-                  mk.extruded = true; // draws a vertical pin stem
+                  mk.extruded = true;
                   mk.label = labelText;
                   el.setAttribute("data-lead-id", lead._id);
                   el.setAttribute("data-score-band", band);
@@ -624,14 +625,14 @@ export function MapSlot({
               lng: cLng,
               altitude: 6,
             }));
-            // Altitude 90m → above most London building roofs (commercial
-            // buildings around the City of London peak around 60-80m).
-            // RELATIVE_TO_GROUND tracks terrain. Without this the polygon
-            // sits at 6m which is INSIDE the building geometry → invisible.
+            // Altitude 50m: most central-London commercial roofs sit
+            // 30-50m above ground. Above that, polygons float disconnected
+            // in the sky. Below 30m they're hidden inside the building
+            // geometry. 50 is the sweet spot for visible-on-most-roofs.
             const outerHigh = ring.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
-              altitude: 90,
+              altitude: 50,
             }));
             return (
               <gmp-polygon-3d-element
@@ -662,7 +663,7 @@ export function MapSlot({
             const outer = p.corners.map(([cLng, cLat]) => ({
               lat: cLat,
               lng: cLng,
-              altitude: 95,
+              altitude: 55, // 5m above the radiance polygon (50m)
             }));
             return (
               <gmp-polygon-3d-element
