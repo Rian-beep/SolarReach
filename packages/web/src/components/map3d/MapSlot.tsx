@@ -96,20 +96,24 @@ const GOOGLE_MAPS_API_KEY =
 
 // UK-wide overview camera. Google 3D tiles cap altitude/range around ~25km;
 // values above that throw a generic "didn't load Maps correctly" error.
-// 8km altitude + 80km range + 30° tilt gives a punchy "whole UK market" framing
-// without exceeding the alpha SDK limits.
+// 8km altitude + 80km range + 0° tilt = top-down "whole UK" framing.
 const UK_CENTER = { lat: 54.5, lng: -2.5, alt: 8000 };
 const UK_RANGE = 80000;
-const UK_TILT = 30;
+const UK_TILT = 0; // top-down default (user can two-finger swipe up to tilt)
 
 // First-scan-complete camera tuning
 const SCAN_RANGE = 2000;
-const SCAN_TILT = 55;
+const SCAN_TILT = 0; // also top-down — user controls tilt explicitly
 
 // Lead-selected camera tuning
 const LEAD_RANGE = 220;
-const LEAD_TILT = 67;
+const LEAD_TILT = 45; // oblique on lead drill-down (within user's 0-45 range)
 const LEAD_ALT = 80;
+
+// Two-finger swipe → tilt mapping
+const TILT_MIN = 0;
+const TILT_MAX = 45;
+const TILT_PER_DELTA_PX = 0.18; // pixels of vertical scroll per degree of tilt
 
 // Animation durations (ms). Linear / ease-out only per Gotham theme.
 const FLY_BOOT_TO_SCAN_MS = 1500;
@@ -289,6 +293,32 @@ export function MapSlot({
     root.addEventListener("gmp-click", handler);
     return () => root.removeEventListener("gmp-click", handler);
   }, [sdkReady, onLeadClick]);
+
+  // Two-finger swipe (vertical wheel events on Mac trackpads) → adjust tilt.
+  // Plain wheel = tilt; Cmd/Ctrl+wheel = native zoom (preserved by stopping
+  // event only when no modifier is held).
+  useEffect(() => {
+    if (!sdkReady || !mapRef.current) return;
+    const root = mapRef.current;
+    const onWheel = (ev: WheelEvent) => {
+      // Let pinch-zoom + Cmd/Ctrl combos fall through to native zoom.
+      if (ev.ctrlKey || ev.metaKey) return;
+      // Only handle vertical scrolls (two-finger swipe up/down). Horizontal
+      // scrolls are left to the SDK.
+      if (Math.abs(ev.deltaY) < Math.abs(ev.deltaX)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const m = root as unknown as { tilt?: number };
+      const currentTilt = typeof m.tilt === "number" ? m.tilt : UK_TILT;
+      // deltaY > 0 (swipe down) = look more down = tilt --
+      // deltaY < 0 (swipe up)   = look more oblique = tilt ++
+      const next = currentTilt + -ev.deltaY * TILT_PER_DELTA_PX * -1;
+      const clamped = Math.max(TILT_MIN, Math.min(TILT_MAX, next));
+      (root as unknown as Record<string, unknown>).tilt = clamped;
+    };
+    root.addEventListener("wheel", onWheel, { passive: false });
+    return () => root.removeEventListener("wheel", onWheel);
+  }, [sdkReady]);
 
   // Subscribe to camera changes → push into useCameraStore for HUDs.
   useEffect(() => {

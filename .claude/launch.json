@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "packages/web", "dev", "--port", "5173", "--host", "0.0.0.0"],
+      "port": 5173
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/start-api.sh"],
+      "port": 8000
+    }
+  ]
+}
