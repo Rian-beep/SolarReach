@@ -5,17 +5,39 @@ export type LayerState = Record<LayerKey, boolean>;
 interface HUDLayerToggleProps {
   state: LayerState;
   onChange: (next: LayerState) => void;
-  /** When false, lead-dependent layers (radiance/panels/polygons) are
-   *  disabled and grayed out — pins remains live. */
+  /** When false, lead-dependent layers (radiance/panels) hint that they
+   *  need a lead selection — but stay clickable. */
   hasSelectedLead?: boolean;
   className?: string;
 }
 
-const LAYERS: { key: LayerKey; label: string; needsLead: boolean }[] = [
-  { key: "pins", label: "PINS", needsLead: false },
-  { key: "radiance", label: "RADIANCE", needsLead: true },
-  { key: "panels", label: "PANELS", needsLead: true },
-  { key: "polygons", label: "POLYGONS", needsLead: true },
+interface LayerDef {
+  key: LayerKey;
+  label: string;
+  hint: string;
+  needsLead: boolean;
+}
+
+const LAYERS: LayerDef[] = [
+  { key: "pins", label: "PINS", hint: "lead markers", needsLead: false },
+  {
+    key: "polygons",
+    label: "ROOFS",
+    hint: "rooftop tint by score",
+    needsLead: false,
+  },
+  {
+    key: "radiance",
+    label: "RADIANCE",
+    hint: "Solar API flux PNG HUD",
+    needsLead: true,
+  },
+  {
+    key: "panels",
+    label: "PANELS",
+    hint: "per-panel layout",
+    needsLead: true,
+  },
 ];
 
 export function HUDLayerToggle({
@@ -27,44 +49,42 @@ export function HUDLayerToggle({
   return (
     <div
       className={
-        "absolute bottom-3 right-3 z-20 rounded-[2px] border border-iron-bright px-2 py-1.5 font-mono text-xs " +
+        "pointer-events-auto absolute bottom-3 right-3 z-30 rounded-[2px] border border-iron-bright px-2.5 py-2 font-mono text-xs " +
+        "shadow-[0_0_24px_-4px_rgba(0,0,0,0.9)] " +
         (className ?? "")
       }
-      style={{ backgroundColor: "rgba(10, 14, 20, 0.8)" }}
+      // Solid app-surface bg — must read against bright photorealistic
+      // imagery (sun-lit white buildings) without losing contrast.
+      style={{ backgroundColor: "#0A0E14F5" }}
     >
-      <div className="text-grid uppercase tracking-wide mb-1">LAYERS</div>
-      <div className="flex flex-col gap-px">
+      <div className="text-cyan uppercase tracking-widest mb-1.5 text-[10px]">
+        LAYERS
+      </div>
+      <div className="flex flex-col gap-0.5">
         {LAYERS.map((l) => {
           const on = state[l.key];
-          const disabled = l.needsLead && !hasSelectedLead;
+          const ghost = l.needsLead && !hasSelectedLead;
+          // Lead-required layers stay CLICKABLE even without a lead — the
+          // hint just notes when they'll have data to show.
           return (
             <label
               key={l.key}
-              aria-disabled={disabled}
-              className={
-                "flex items-center gap-2 select-none px-1 py-0.5 transition-colors duration-[80ms] " +
-                (disabled
-                  ? "cursor-not-allowed opacity-50"
-                  : "cursor-pointer hover:bg-app-elev-1")
-              }
+              className="flex items-center gap-2 select-none cursor-pointer rounded-[2px] px-1 py-0.5 transition-colors duration-[80ms] hover:bg-app-elev-1"
             >
               <span
                 className={
-                  "inline-flex size-3 items-center justify-center border " +
-                  (disabled
-                    ? "border-iron text-grid"
-                    : on
-                      ? "border-cyan bg-cyan/20 text-cyan"
-                      : "border-iron text-dim")
+                  "inline-flex size-3.5 shrink-0 items-center justify-center border text-[10px] leading-none " +
+                  (on
+                    ? "border-cyan bg-cyan/30 text-cyan"
+                    : "border-iron-bright text-dim")
                 }
                 aria-hidden
               >
-                {on && !disabled ? "x" : ""}
+                {on ? "✕" : ""}
               </span>
               <input
                 type="checkbox"
                 checked={on}
-                disabled={disabled}
                 onChange={(e) =>
                   onChange({ ...state, [l.key]: e.target.checked })
                 }
@@ -72,20 +92,23 @@ export function HUDLayerToggle({
               />
               <span
                 className={
-                  "uppercase tracking-wide " +
-                  (disabled ? "text-grid" : on ? "text-bone" : "text-dim")
+                  "flex-1 uppercase tracking-wide " +
+                  (on ? "text-bone" : "text-mute")
                 }
               >
                 {l.label}
               </span>
+              {ghost && (
+                <span
+                  className="text-[9px] uppercase tracking-widest text-grid"
+                  title="select a lead to populate this layer"
+                >
+                  ·idle
+                </span>
+              )}
             </label>
           );
         })}
-        {!hasSelectedLead && (
-          <div className="mt-1 border-t border-iron-grid pt-1 text-grid uppercase tracking-wide">
-            select a lead
-          </div>
-        )}
       </div>
     </div>
   );

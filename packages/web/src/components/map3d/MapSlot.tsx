@@ -608,6 +608,32 @@ export function MapSlot({
             );
           })}
 
+        {/* Per-panel cyan polygons — only when PANELS layer toggled on AND
+            the selected lead has a clipped panel layout from Solar API. */}
+        {showPanels &&
+          panelLayout?.panels?.map((p, i) => {
+            if (!p.corners || p.corners.length < 3) return null;
+            const outer = p.corners.map(([cLng, cLat]) => ({
+              lat: cLat,
+              lng: cLng,
+              altitude: 8,
+            }));
+            return (
+              <gmp-polygon-3d-element
+                key={`panel-${selectedLeadId}-${i}`}
+                ref={(el) => {
+                  if (!el) return;
+                  const pp = el as unknown as Record<string, unknown>;
+                  pp.outerCoordinates = outer;
+                  pp.altitudeMode = "RELATIVE_TO_GROUND";
+                  pp.fillColor = "#1FB6FF66";
+                  pp.strokeColor = "#1FB6FF";
+                  pp.strokeWidth = 1;
+                }}
+              />
+            );
+          })}
+
         {/* Search target marker — drops at the postcode-typed coordinates
             (postcodes.io geocode), independent of how many leads match.
             Falls back to leads-centroid if the geocode failed. */}
